@@ -2,7 +2,7 @@
 
 Reusable, opt-in diagnostic reports for **Laravel 8/9/10/11/12, PHP 7.4+, and Vue 3.3+**. Supports Vue applications with or without Inertia. The framework-neutral core also works in Blade/jQuery pages.
 
-Status: **0.1.1 initial implementation**. Package names are GitHub/private package names, not public Packagist or npm registry entries. No database migrations, dashboard, background uploads, or hosted service. Test in a staging application before enabling it for selected production users. Laravel 13 and Vue 2 are not declared compatible in this release.
+Status: **0.1.2 initial implementation**. Install from GitHub; the packages are not yet published to Packagist or the npm registry. Version 0.1.2 fixes missing JavaScript build files during GitHub installation. No database migrations, dashboard, background uploads, or hosted service. Test in a staging application before enabling it for selected production users. Laravel 13 and Vue 2 are not declared compatible in this release.
 
 ## What it captures
 
@@ -65,7 +65,7 @@ The service provider is auto-discovered.
 Recommended GitHub install:
 
 ```shell
-npm install github:CalvinChong123/TraceBug#v0.1.1
+npm install github:CalvinChong123/TraceBug#v0.1.2
 ```
 
 For local development while editing TraceBug:
@@ -273,14 +273,13 @@ After the server eligibility check, dynamically import `@tracebug/vue/core` and 
 
 ### Example: `sapu-web` Laravel 8 + Mix + Blade
 
-Install dependencies from the local TraceBug source while testing:
+Install dependencies from the public GitHub repository:
 
 ```json
 "repositories": [
   {
-    "type": "path",
-    "url": "C:/laragon/www/bug-tracking",
-    "options": { "symlink": true, "versions": { "tracebug/laravel": "0.1.1" } }
+    "type": "vcs",
+    "url": "https://github.com/CalvinChong123/TraceBug.git"
   }
 ]
 ```
@@ -289,9 +288,9 @@ Then run:
 
 ```shell
 cd C:/laragon/www/sapu-web
-composer require tracebug/laravel:0.1.1
+composer require tracebug/laravel:0.1.2
 php artisan vendor:publish --tag=tracebug-config
-npm install C:/laragon/www/bug-tracking
+npm install github:CalvinChong123/TraceBug#v0.1.2
 ```
 
 Enable only your test admin/user ID in `.env`:
