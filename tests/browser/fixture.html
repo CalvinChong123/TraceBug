@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="csrf-token" content="fixture-csrf"><title>TraceBug verification</title>
+<style>body{font-family:Arial,sans-serif;margin:24px;background:#f1f5f9;color:#172554}main{background:white;padding:24px;border-radius:16px;max-width:680px}label{display:block;margin:16px 0}input{padding:8px}button{padding:8px 14px}.overflow{width:1800px;height:24px;background:#dbeafe;margin:16px 0}.private{width:240px;height:48px;background:rgb(255,0,255);color:rgb(255,0,255)}</style>
+</head><body><div id="app"></div>
+<script type="module">
+import { createApp, h } from 'vue';
+import { TraceBugPlugin, TraceBugButton, useTraceBug } from '/dist/vue.js';
+const app = createApp({
+  setup() {
+    const tracebug = useTraceBug();
+    return () => h('main', [
+      h('h1', 'TraceBug browser verification'),
+      h('p', 'A fixture for redaction, failed requests and layout evidence.'),
+      h('label', ['Private form value ', h('input', { value: 'sensitive-password', type: 'text' })]),
+      h('div', { class: 'private', 'data-tracebug-private': '' }, 'Private customer region'),
+      h('div', { class: 'overflow' }, 'Intentional horizontal overflow'),
+      h('img', { src: '/missing-fixture-image.png', alt: 'Broken image fixture', width: 160, height: 40 }),
+      h('button', { 'data-tracebug-label': 'Save fixture', onClick: () => fetch('/api/save?token=secret', { method: 'POST', body: 'password=secret' }) }, 'Save fixture'),
+      h('button', { 'data-tracebug-label': 'XHR fixture', onClick: () => { const xhr = new XMLHttpRequest(); xhr.open('POST', '/api/save'); xhr.send('password=secret'); } }, 'XHR fixture'),
+      h('button', { onClick: () => tracebug.value?.stop() }, 'Stop capture'),
+      h(TraceBugButton),
+    ]);
+  }
+});
+app.use(TraceBugPlugin);
+app.mount('#app');
+</script></body></html>

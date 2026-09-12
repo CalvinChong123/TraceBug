@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "module": "ESNext", "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"], "strict": true,
+    "declaration": true, "outDir": "dist", "rootDir": "resources/js",
+    "skipLibCheck": true
+  },
+  "include": ["resources/js/**/*.ts"]
+}

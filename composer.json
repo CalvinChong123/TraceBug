@@ -1,0 +1,20 @@
+{
+  "name": "tracebug/laravel",
+  "description": "Opt-in, self-hosted diagnostic reports for Laravel and Vue applications.",
+  "type": "library",
+  "license": "proprietary",
+  "require": {
+    "php": "^8.2",
+    "illuminate/support": "^11.0 || ^12.0",
+    "illuminate/http": "^11.0 || ^12.0",
+    "illuminate/routing": "^11.0 || ^12.0",
+    "illuminate/cache": "^11.0 || ^12.0"
+  },
+  "require-dev": {"orchestra/testbench": "^9.0 || ^10.0", "phpunit/phpunit": "^11.0"},
+  "autoload": {"psr-4": {"TraceBug\\": "src/"}},
+  "autoload-dev": {"psr-4": {"TraceBug\\Tests\\": "tests/"}},
+  "extra": {"laravel": {"providers": ["TraceBug\\TraceBugServiceProvider"]}},
+  "scripts": {"test": "phpunit"},
+  "config": {"sort-packages": true, "allow-plugins": {"php-http/discovery": false}},
+  "archive": {"exclude": ["/vendor", "/node_modules", "/test-output", "/.git", "/.phpunit.cache", "/dist", "/*.tgz", "/*.zip"]}
+}
