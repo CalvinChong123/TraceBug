@@ -6,7 +6,7 @@ use Illuminate\Http\Request;
 
 class Access
 {
-    public function user(Request $request): mixed
+    public function user(Request $request)
     {
         return $request->user(config('tracebug.guard'));
     }

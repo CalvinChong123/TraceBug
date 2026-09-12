@@ -36,7 +36,7 @@ class ReportController
         abort_if(strlen($request->input('payload')) > config('tracebug.max_payload_bytes'), 413);
         try {
             $payload = json_decode($request->input('payload'), true, 16, JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
+        } catch (\JsonException $error) {
             throw ValidationException::withMessages(['payload' => 'Invalid report JSON.']);
         }
         if (! is_array($payload)) {
@@ -116,8 +116,12 @@ class ReportController
                 if ($extension) {
                     $store->write($temporary.'/screenshot.'.$extension, file_get_contents($image->getRealPath()));
                 }
-                if (! rename($temporary, $target)) {
-                    throw new \RuntimeException('Cannot finalize TraceBug report.');
+                if (! @rename($temporary, $target)) {
+                    $filesystem = new \Illuminate\Filesystem\Filesystem;
+                    if (is_dir($target) || ! $filesystem->copyDirectory($temporary, $target)) {
+                        throw new \RuntimeException('Cannot finalize TraceBug report.');
+                    }
+                    $filesystem->deleteDirectory($temporary);
                 }
             } finally {
                 if (is_dir($temporary)) {

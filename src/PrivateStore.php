@@ -15,7 +15,9 @@ class PrivateStore
         $this->directory($path);
         $real = realpath($path);
         $public = realpath(public_path());
-        if ($real === false || ($public && (strcasecmp($real, $public) === 0 || str_starts_with(strtolower(str_replace('\\', '/', $real)), strtolower(str_replace('\\', '/', $public)).'/')))) {
+        $normalizedReal = strtolower(str_replace('\\', '/', $real ?: ''));
+        $normalizedPublic = strtolower(str_replace('\\', '/', $public ?: ''));
+        if ($real === false || ($public && (strcasecmp($real, $public) === 0 || strpos($normalizedReal, $normalizedPublic.'/') === 0))) {
             throw new RuntimeException('TraceBug storage must be outside the public directory.');
         }
 

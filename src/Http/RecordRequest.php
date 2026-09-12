@@ -13,7 +13,7 @@ use TraceBug\Redactor;
 
 class RecordRequest
 {
-    public function handle(Request $request, Closure $next): mixed
+    public function handle(Request $request, Closure $next)
     {
         $access = app(Access::class);
         if (! $access->allows($request) || $request->is(trim(config('tracebug.prefix'), '/').'/*')) {
@@ -32,7 +32,9 @@ class RecordRequest
             $response = $handler->render($request, $error);
         }
         // Laravel may already have rendered an exception inside the routing pipeline.
-        $exception ??= $response->exception ?? null;
+        if ($exception === null && isset($response->exception)) {
+            $exception = $response->exception;
+        }
         $response->headers->set('X-Request-ID', $id);
 
         // Diagnostic failures must never break the application's response.
@@ -41,7 +43,7 @@ class RecordRequest
             $context = [
                 'request_id' => $id,
                 'method' => $request->method(),
-                'route' => $request->route()?->uri(),
+                'route' => $request->route() ? $request->route()->uri() : null,
                 'status' => $response->getStatusCode(),
                 'timestamp' => now()->toIso8601String(),
                 'duration_ms' => round((microtime(true) - $started) * 1000),
@@ -60,7 +62,7 @@ class RecordRequest
             if (is_string($client) && Str::isUuid($client)) {
                 $cache->put($scope.':'.$client, $context, $ttl);
             }
-        } catch (Throwable) {
+        } catch (Throwable $ignored) {
             // Report submission will show missing context, without changing app behavior.
         }
 

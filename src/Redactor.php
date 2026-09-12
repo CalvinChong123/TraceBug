@@ -30,7 +30,7 @@ class Redactor
         return $this->text($path);
     }
 
-    public function clean(mixed $value, int $depth = 0): mixed
+    public function clean($value, int $depth = 0)
     {
         if ($depth > 8) {
             return '[truncated]';

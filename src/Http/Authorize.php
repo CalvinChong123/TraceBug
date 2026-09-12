@@ -8,7 +8,7 @@ use TraceBug\Access;
 
 class Authorize
 {
-    public function handle(Request $request, Closure $next): mixed
+    public function handle(Request $request, Closure $next)
     {
         abort_unless(app(Access::class)->allows($request), 404);
 

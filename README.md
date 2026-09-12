@@ -1,8 +1,8 @@
 # TraceBug
 
-Reusable, opt-in diagnostic reports for **Laravel 11/12, PHP 8.2+, and Vue 3.3+**. Supports Vue applications with or without Inertia. The framework-neutral core also works in Blade pages.
+Reusable, opt-in diagnostic reports for **Laravel 8/9/10/11/12, PHP 7.4+, and Vue 3.3+**. Supports Vue applications with or without Inertia. The framework-neutral core also works in Blade/jQuery pages.
 
-Status: **0.1.0 initial implementation**. Package names are local names, not published registry entries. No database migrations, dashboard, background uploads, or hosted service. Test in a staging application before enabling it for selected production users. Laravel 13 and Vue 2 are not declared compatible in this release.
+Status: **0.1.1 initial implementation**. Package names are GitHub/private package names, not public Packagist or npm registry entries. No database migrations, dashboard, background uploads, or hosted service. Test in a staging application before enabling it for selected production users. Laravel 13 and Vue 2 are not declared compatible in this release.
 
 ## What it captures
 
@@ -21,14 +21,13 @@ Keep this repository as the shared package source. Do not copy its implementatio
 
 ### 1. Laravel dependency
 
-For local development, add a Composer path repository to the application's `composer.json` (adjust the path):
+Recommended for projects that can access GitHub: tag this repository and install it as a Composer VCS dependency. In the application's `composer.json`, add:
 
 ```json
 "repositories": [
   {
-    "type": "path",
-    "url": "C:/laragon/www/bug-tracking",
-    "options": { "symlink": true, "versions": { "tracebug/laravel": "0.1.0" } }
+    "type": "vcs",
+    "url": "https://github.com/CalvinChong123/TraceBug.git"
   }
 ]
 ```
@@ -36,28 +35,56 @@ For local development, add a Composer path repository to the application's `comp
 Then run in the application:
 
 ```shell
-composer require tracebug/laravel:0.1.0
+composer require tracebug/laravel:^0.1
 php artisan vendor:publish --tag=tracebug-config
 ```
 
-The service provider is auto-discovered. For deployments, use a private Git repository with a `v0.1.0` tag and a Composer VCS repository instead of an absolute local path. This repository has not been published or pushed anywhere.
+For local development while editing TraceBug, use a Composer path repository instead. This symlinks the package source, so edits in `C:/laragon/www/bug-tracking` are immediately visible to the application after Composer autoload refreshes:
 
-### 2. Vue dependency
+```json
+"repositories": [
+  {
+    "type": "path",
+    "url": "C:/laragon/www/bug-tracking",
+    "options": { "symlink": true, "versions": { "tracebug/laravel": "0.1.1" } }
+  }
+]
+```
 
-In this package repository:
+Then run:
 
 ```shell
+composer require tracebug/laravel:0.1.1
+php artisan vendor:publish --tag=tracebug-config
+```
+
+The service provider is auto-discovered.
+
+### 2. JavaScript dependency
+
+Recommended GitHub install:
+
+```shell
+npm install github:CalvinChong123/TraceBug#v0.1.1
+```
+
+For local development while editing TraceBug:
+
+```shell
+npm install C:/laragon/www/bug-tracking
+```
+
+The tarball flow is only for quick offline tests:
+
+```shell
+cd C:/laragon/www/bug-tracking
 npm ci
 npm pack
+cd C:/laragon/www/your-app
+npm install C:/laragon/www/bug-tracking/tracebug-vue-0.1.1.tgz
 ```
 
-This creates `tracebug-vue-0.1.0.tgz`. In each application:
-
-```shell
-npm install C:/laragon/www/bug-tracking/tracebug-vue-0.1.0.tgz
-```
-
-Keep the tarball available to the application's CI, or publish to your private npm registry when ready. Import Vue components and the core through the documented exports only.
+Import Vue components and the core through the documented exports only.
 
 ### 3. Enable selected users
 
@@ -92,6 +119,20 @@ Route::middleware(['auth:sanctum', \TraceBug\Http\RecordRequest::class])
 ```
 
 Apply it once per request. It records only eligible users' requests, skips TraceBug endpoints, and leaves disabled requests untouched. Requests outside this middleware have browser evidence but no server enrichment. Server processes that crash before returning a response may have no saved context.
+
+For Laravel 8/9/10 projects, add it at the end of the `web` middleware group in `app/Http/Kernel.php`, after session, CSRF and route binding middleware:
+
+```php
+'web' => [
+    \App\Http\Middleware\EncryptCookies::class,
+    \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
+    \Illuminate\Session\Middleware\StartSession::class,
+    \Illuminate\View\Middleware\ShareErrorsFromSession::class,
+    \App\Http\Middleware\VerifyCsrfToken::class,
+    \Illuminate\Routing\Middleware\SubstituteBindings::class,
+    \TraceBug\Http\RecordRequest::class,
+],
+```
 
 ### 5. Load Vue integration only for eligible users
 
@@ -229,6 +270,111 @@ File storage assumes a single application server or a shared filesystem with rel
 ## Blade-only integration
 
 After the server eligibility check, dynamically import `@tracebug/vue/core` and call `startTraceBug()`. It returns `null` when unavailable or a client with `report()`, `recordError()` and `stop()`. Connect your own Blade button to `report()` and display its returned Report ID. No Vue dependency is imported by the core entry point, though the npm package declares Vue as a peer for its Vue integration.
+
+### Example: `sapu-web` Laravel 8 + Mix + Blade
+
+Install dependencies from the local TraceBug source while testing:
+
+```json
+"repositories": [
+  {
+    "type": "path",
+    "url": "C:/laragon/www/bug-tracking",
+    "options": { "symlink": true, "versions": { "tracebug/laravel": "0.1.1" } }
+  }
+]
+```
+
+Then run:
+
+```shell
+cd C:/laragon/www/sapu-web
+composer require tracebug/laravel:0.1.1
+php artisan vendor:publish --tag=tracebug-config
+npm install C:/laragon/www/bug-tracking
+```
+
+Enable only your test admin/user ID in `.env`:
+
+```dotenv
+TRACEBUG_ENABLED=true
+TRACEBUG_ALLOWED_USERS=1
+TRACEBUG_RELEASE=local-sapu-web
+```
+
+Add `\TraceBug\Http\RecordRequest::class` to the end of the `web` middleware group in `app/Http/Kernel.php`.
+
+In `resources/views/layouts/app.blade.php`, keep the existing CSRF meta and add this in `<head>`:
+
+```blade
+@if(app(\TraceBug\Access::class)->allows(request()))
+    <meta name="tracebug-enabled" content="1">
+@endif
+```
+
+Add a button for logged-in pages before `</body>`:
+
+```blade
+@if(app(\TraceBug\Access::class)->allows(request()))
+    <button
+        id="tracebug-report-button"
+        type="button"
+        style="position:fixed;right:16px;bottom:16px;z-index:2147483647"
+    >
+        Report bug
+    </button>
+@endif
+```
+
+In `resources/js/app.js`, add this after the existing `require(...)` imports:
+
+```js
+if (document.querySelector('meta[name="tracebug-enabled"]')) {
+  import('@tracebug/vue/core').then(({ startTraceBug }) => {
+    startTraceBug().then((client) => {
+      if (!client) {
+        return;
+      }
+
+      const button = document.getElementById('tracebug-report-button');
+      if (!button) {
+        return;
+      }
+
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        const originalText = button.textContent;
+        button.textContent = 'Reporting...';
+        try {
+          const result = await client.report();
+          button.textContent = result.report_id || 'Report sent';
+        } catch (error) {
+          button.textContent = 'Try again';
+        } finally {
+          setTimeout(() => {
+            button.disabled = false;
+            button.textContent = originalText;
+          }, 3000);
+        }
+      });
+    });
+  });
+}
+```
+
+Rebuild assets and clear config cache:
+
+```shell
+npm run dev
+php artisan config:clear
+```
+
+Log in as the allowed user, click **Report bug**, then inspect reports:
+
+```shell
+php artisan tracebug:list
+php artisan tracebug:show TB-0123456789ABCDEF0123456789ABCDEF
+```
 
 ## Development and verification
 

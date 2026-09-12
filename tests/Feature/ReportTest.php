@@ -42,7 +42,7 @@ class ReportTest extends TestCase
         parent::tearDown();
     }
 
-    private function user(int $id = 1): static
+    private function user(int $id = 1): self
     {
         return $this->actingAs(new GenericUser(['id' => $id]));
     }
@@ -78,7 +78,8 @@ class ReportTest extends TestCase
     {
         $this->user(2)->getJson('/_tracebug/config')->assertExactJson(['enabled' => false]);
         $this->upload($this->payload())->assertNotFound();
-        $this->user()->getJson('/_tracebug/config')->assertJsonPath('enabled', true)->assertJsonMissingPath('allowed_users')->assertHeader('Cache-Control', 'no-store, private');
+        $response = $this->user()->getJson('/_tracebug/config')->assertJsonPath('enabled', true)->assertHeader('Cache-Control', 'no-store, private');
+        $this->assertArrayNotHasKey('allowed_users', $response->json());
     }
 
     public function test_empty_allowlist_still_requires_authentication(): void
