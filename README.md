@@ -2,7 +2,7 @@
 
 Reusable, opt-in diagnostic reports for **Laravel 8/9/10/11/12, PHP 7.4+, and Vue 3.3+**. Supports Vue applications with or without Inertia. The framework-neutral core also works in Blade/jQuery pages.
 
-Status: **0.1.2 initial implementation**. Install from GitHub; the packages are not yet published to Packagist or the npm registry. Version 0.1.2 fixes missing JavaScript build files during GitHub installation. No database migrations, dashboard, background uploads, or hosted service. Test in a staging application before enabling it for selected production users. Laravel 13 and Vue 2 are not declared compatible in this release.
+Status: **0.1.3 initial implementation**. Install from GitHub; the packages are not yet published to Packagist or the npm registry. Version 0.1.3 records browser resource timings in network evidence and improves screenshot cleanup for TraceBug's own UI. No database migrations, dashboard, background uploads, or hosted service. Test in a staging application before enabling it for selected production users. Laravel 13 and Vue 2 are not declared compatible in this release.
 
 ## What it captures
 
@@ -65,7 +65,7 @@ The service provider is auto-discovered.
 Recommended GitHub install:
 
 ```shell
-npm install github:CalvinChong123/TraceBug#v0.1.2
+npm install github:CalvinChong123/TraceBug#v0.1.3
 ```
 
 For local development while editing TraceBug:
@@ -288,9 +288,9 @@ Then run:
 
 ```shell
 cd C:/laragon/www/sapu-web
-composer require tracebug/laravel:0.1.2
+composer require tracebug/laravel:0.1.3
 php artisan vendor:publish --tag=tracebug-config
-npm install github:CalvinChong123/TraceBug#v0.1.2
+npm install github:CalvinChong123/TraceBug#v0.1.3
 ```
 
 Enable only your test admin/user ID in `.env`:

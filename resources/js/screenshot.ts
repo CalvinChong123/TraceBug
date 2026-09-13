@@ -30,10 +30,13 @@ export async function capture(selector = PRIVATE_SELECTOR): Promise<Blob> {
   const { default: html2canvas } = await import('html2canvas');
   const canvas = await html2canvas(document.body, {
     width: innerWidth, height: innerHeight, x: scrollX, y: scrollY,
+    windowWidth: innerWidth, windowHeight: innerHeight,
     scale: Math.min(devicePixelRatio || 1, 1.5, Math.sqrt(4_000_000 / Math.max(1, innerWidth * innerHeight))),
     useCORS: true, allowTaint: false, logging: false, imageTimeout: 2000,
+    backgroundColor: getComputedStyle(document.body).backgroundColor || null,
     ignoreElements: element => element.hasAttribute('data-tracebug-ui'),
     onclone: clone => {
+      for (const element of clone.querySelectorAll('[data-tracebug-ui]')) element.remove();
       // Modify the clone only. Replace sensitive regions with opaque placeholders.
       for (const element of clone.querySelectorAll(selector)) {
         const rect = element.getBoundingClientRect();

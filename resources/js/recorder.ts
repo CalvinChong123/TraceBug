@@ -38,6 +38,43 @@ export function createRecorder(config: ServerConfig, options: TraceBugOptions): 
       if (clean) buffer.add(clean);
     } catch { /* Diagnostics must not throw into the application. */ }
   };
+  const resourceEvents = () => {
+    try {
+      return (performance.getEntriesByType('resource') as PerformanceResourceTiming[])
+        .filter(entry => entry.name && !own(entry.name) && !['fetch', 'xmlhttprequest'].includes(entry.initiatorType))
+        .slice(-30)
+        .map((entry, index) => {
+          const data: Record<string, unknown> = {
+            method: 'GET',
+            url: url(entry.name),
+            state: 'completed',
+            initiator_type: safeText(entry.initiatorType || 'resource'),
+            duration_ms: Math.round(entry.duration),
+          };
+          if (entry.transferSize > 0) data.transfer_size = entry.transferSize;
+          return {
+            id: `resource-${Math.round(entry.startTime)}-${index}`,
+            at: Math.round(performance.timeOrigin + entry.startTime),
+            type: 'network' as const,
+            data,
+          };
+        });
+    } catch { return []; }
+  };
+  const reportEvents = () => {
+    const current = buffer.snapshot();
+    const seen = new Set(current.filter(event => event.type === 'network').map(event => String(event.data.url) + ':' + String(event.data.state)));
+    const resources = resourceEvents().filter(event => !seen.has(String(event.data.url) + ':' + String(event.data.state)));
+    const merged = [...current, ...resources].sort((a, b) => a.at - b.at);
+    if (merged.length <= 50) return merged;
+    const protectedIds = new Set(merged.filter(event => ['error', 'vue', 'console'].includes(event.type)).slice(-20).map(event => event.id));
+    const selected: TraceBugEvent[] = [];
+    for (const event of [...merged].reverse()) {
+      if (selected.length >= 50) break;
+      if (protectedIds.has(event.id) || selected.length < 30 || event.type !== 'network' || event.data.initiator_type !== undefined) selected.push(event);
+    }
+    return selected.reverse().sort((a, b) => a.at - b.at);
+  };
   const listen = (target: EventTarget, type: string, handler: EventListener, capture = false) => {
     target.addEventListener(type, handler, capture);
     undo.push(() => target.removeEventListener(type, handler, capture));
@@ -190,7 +227,7 @@ export function createRecorder(config: ServerConfig, options: TraceBugOptions): 
       throw new Error('TraceBug access changed. Reload the page.');
     }
     if (!pending) {
-      const events = buffer.snapshot();
+      const events = reportEvents();
       const payload: Record<string, unknown> = {
         schema_version: 1, submission_id: crypto.randomUUID(), captured_at: new Date().toISOString(), events,
         page: { url: url(location.href), viewport: { width: innerWidth, height: innerHeight },

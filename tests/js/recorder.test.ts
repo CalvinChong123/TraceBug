@@ -122,6 +122,25 @@ describe('recording and submission', () => {
     expect(payload.screenshot_status).toBe('failed');
     expect(payload.ui.horizontal_overflow).toBe(true);
   });
+  it('includes browser resource timings in network evidence', async () => {
+    let payload: any;
+    vi.spyOn(performance, 'getEntriesByType').mockReturnValue([
+      { name: 'http://localhost:3000/storage/banner/abc.jpg?token=secret', initiatorType: 'img', startTime: 10, duration: 25.4, transferSize: 1234 },
+      { name: 'http://localhost:3000/_tracebug/config', initiatorType: 'fetch', startTime: 15, duration: 3, transferSize: 200 },
+    ] as PerformanceResourceTiming[]);
+    window.fetch = vi.fn(async (_input, init) => {
+      if (init?.method !== 'POST') return new Response(JSON.stringify(config));
+      payload = JSON.parse(String((init.body as FormData).get('payload')));
+      return new Response(JSON.stringify({ report_id: 'TB-test' }));
+    });
+    client = createRecorder(config, { screenshot: false });
+    await client.report();
+    expect(payload.events).toContainEqual(expect.objectContaining({
+      type: 'network',
+      data: expect.objectContaining({ url: '/storage/banner/abc.jpg', initiator_type: 'img', transfer_size: 1234 }),
+    }));
+    expect(JSON.stringify(payload.events)).not.toContain('secret');
+  });
   it('clears context and prevents upload after an account change', async () => {
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...config, scope: 'other-user' })));
     window.fetch = fetch;
