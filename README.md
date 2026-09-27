@@ -19,6 +19,8 @@ The Composer and npm dependencies both come from the same `v0.1.7` Git tag. Pin 
 
    Then run `composer require tracebug/laravel:0.1.7` and `php artisan vendor:publish --tag=tracebug-config`.
 
+   If a Laravel 9–11 application's Composer security policy blocks its existing framework version, see [legacy Composer advisories](#legacy-composer-advisories) below.
+
 2. In the same application, run `npm install github:CalvinChong123/TraceBug#v0.1.7`. In `.env`, set `TRACEBUG_ENABLED=true` and `TRACEBUG_ALLOWED_USERS=1` (replace `1` with your QA user's ID). Run `php artisan config:clear` if configuration was cached.
 
 3. In the root Blade template's `<head>`, add:
@@ -114,6 +116,28 @@ php artisan vendor:publish --tag=tracebug-config
 ```
 
 The service provider is auto-discovered.
+
+#### Legacy Composer advisories
+
+Laravel 9–11 are past upstream security support. Recent Composer versions may refuse to resolve an existing `laravel/framework` 9, 10 or 11 dependency because of known advisories, even when TraceBug itself supports that framework API. TraceBug does not change the consuming application's security policy.
+
+If your team has accepted that existing legacy-framework risk, scope a Composer exception to the application's actual Laravel major version. For example, in a Laravel 9 application's `composer.json`, merge this into its existing `config` object before running `composer require`:
+
+```json
+"policy": {
+  "advisories": {
+    "ignore": {
+      "laravel/framework": {
+        "constraint": "^9.0",
+        "on-audit": false,
+        "reason": "Existing Laravel 9 application; retain audit visibility while planning an upgrade."
+      }
+    }
+  }
+}
+```
+
+Use `^10.0` or `^11.0` only in an application on that version. This exception permits dependency resolution while Composer continues reporting those advisories during audits. Review any other blocked package separately; the package does not apply a global advisory override. See [Composer's policy documentation](https://getcomposer.org/doc/06-config.md#ignore-format).
 
 ### 2. JavaScript dependency
 
