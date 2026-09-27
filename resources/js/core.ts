@@ -1,5 +1,5 @@
 import type { TraceBugClient, TraceBugOptions, ServerConfig } from './types';
-export type { TraceBugClient, TraceBugOptions, TraceBugEvent } from './types';
+export type { TraceBugClient, TraceBugOptions, TraceBugEvent, TraceBugReportInput, ScreenshotSource } from './types';
 
 export function requestHeaders(options: TraceBugOptions): Record<string, string> {
   const csrf = document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content;

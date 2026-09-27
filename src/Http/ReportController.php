@@ -48,6 +48,11 @@ class ReportController
             'captured_at' => ['required', 'date'],
             'page' => ['required', 'array:url,viewport,screen,dpr,orientation,user_agent'],
             'page.url' => ['required', 'string', 'max:2048'],
+            'qa' => ['required', 'array:summary,steps,expected,actual'],
+            'qa.summary' => ['required', 'string', 'min:3', 'max:500'],
+            'qa.steps' => ['sometimes', 'string', 'max:1000'],
+            'qa.expected' => ['sometimes', 'string', 'max:1000'],
+            'qa.actual' => ['sometimes', 'string', 'max:1000'],
             'events' => ['present', 'array', 'max:50'],
             'events.*' => ['array:id,at,type,data'],
             'events.*.id' => ['required', 'string', 'max:64'],
@@ -55,7 +60,8 @@ class ReportController
             'events.*.type' => ['required', 'in:network,error,vue,console,navigation,click,submit'],
             'events.*.data' => ['required', 'array'],
             'ui' => ['present', 'array'],
-            'screenshot_status' => ['required', 'in:captured,failed,timeout,disabled'],
+            'screenshot_status' => ['required', 'in:captured,disabled'],
+            'screenshot_source' => ['required', 'in:browser,upload,paste,none'],
         ])->validate();
 
         $extension = null;
@@ -69,6 +75,9 @@ class ReportController
         }
         if (($data['screenshot_status'] === 'captured') !== ($extension !== null)) {
             throw ValidationException::withMessages(['screenshot' => 'Screenshot status does not match attachment.']);
+        }
+        if (($extension && $data['screenshot_source'] === 'none') || (! $extension && $data['screenshot_source'] !== 'none')) {
+            throw ValidationException::withMessages(['screenshot_source' => 'Screenshot source does not match attachment.']);
         }
 
         $scope = $access->scope($request);
@@ -102,13 +111,20 @@ class ReportController
                 'environment' => app()->environment(),
                 'server_requests' => array_values($contexts),
                 'screenshot_file' => $extension ? 'screenshot.'.$extension : null,
+                'screenshot_source' => $data['screenshot_source'],
             ]);
             $temporary = $root.'/reports/.pending-'.Str::uuid();
             $store->directory($temporary);
             try {
                 $json = fn ($value) => json_encode($value, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR);
                 $store->write($temporary.'/report.json', $json($report));
-                $summary = "$id\nReceived: {$report['received_at']}\nUser: {$report['user_id']}\nPage: {$report['page']['url']}\nEvents: ".count($report['events'])."\nRelated server requests: ".count($contexts)."\nScreenshot: {$report['screenshot_status']}\n";
+                $overview = $report['qa']['summary'];
+                $summary = "$id\nSummary: $overview\nReceived: {$report['received_at']}\nUser: {$report['user_id']}\nPage: {$report['page']['url']}\nEvents: ".count($report['events'])."\nRelated server requests: ".count($contexts)."\nScreenshot: {$report['screenshot_status']} ({$report['screenshot_source']})\n";
+                foreach (['steps' => 'Steps', 'expected' => 'Expected', 'actual' => 'Actual'] as $key => $label) {
+                    if (! empty($report['qa'][$key])) $summary .= "$label: {$report['qa'][$key]}\n";
+                }
+                $summary .= "Report folder: $target\n";
+                if ($extension) $summary .= "Screenshot file: $target/screenshot.$extension\n";
                 $store->write($temporary.'/report.log', $summary);
                 $store->write($temporary.'/network.json', $json(array_values(array_filter($data['events'], fn ($e) => $e['type'] === 'network'))));
                 $store->write($temporary.'/console.json', $json(array_values(array_filter($data['events'], fn ($e) => in_array($e['type'], ['error', 'vue', 'console'])))));
@@ -129,7 +145,7 @@ class ReportController
                 }
             }
             // The report is already committed. An index failure must not cause a duplicate.
-            @file_put_contents($root.'/tracebug.log', json_encode(['report_id' => $id, 'timestamp' => $report['received_at'], 'user_id' => $report['user_id'], 'url' => $report['page']['url'], 'folder' => $target], JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE)."\n", FILE_APPEND | LOCK_EX);
+            @file_put_contents($root.'/tracebug.log', json_encode(['report_id' => $id, 'timestamp' => $report['received_at'], 'user_id' => $report['user_id'], 'summary' => $overview, 'url' => $report['page']['url'], 'folder' => $target], JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE)."\n", FILE_APPEND | LOCK_EX);
             @chmod($root.'/tracebug.log', 0600);
 
             return response()->json(['report_id' => $id, 'duplicate' => false], 201)->header('Cache-Control', 'no-store');

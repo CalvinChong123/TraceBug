@@ -16,10 +16,11 @@ class ReportsCommand extends Command
         foreach (glob($store->root().'/reports/TB-*/report.json') ?: [] as $file) {
             $report = json_decode(file_get_contents($file), true);
             if ($report) {
-                $rows[] = [$report['report_id'], $report['received_at'], $report['user_id'], $report['page']['url']];
+                $rows[] = [$report['report_id'], $report['received_at'], $report['user_id'], $report['qa']['summary'], $report['page']['url']];
             }
         }
-        $this->table(['Report ID', 'Received', 'User', 'Page'], $rows);
+        usort($rows, fn ($a, $b) => strcmp($b[1], $a[1]));
+        $this->table(['Report ID', 'Received', 'User', 'Summary', 'Page'], $rows);
 
         return self::SUCCESS;
     }

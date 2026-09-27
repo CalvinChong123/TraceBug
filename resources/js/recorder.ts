@@ -1,8 +1,8 @@
 import { EventBuffer } from './buffer';
 import { requestHeaders } from './core';
 import { PRIVATE_SELECTOR, safeLabel, safeText, safeUrl } from './privacy';
-import { capture, diagnose } from './screenshot';
-import type { ServerConfig, TraceBugClient, TraceBugEvent, TraceBugOptions } from './types';
+import { diagnose } from './screenshot';
+import type { ServerConfig, TraceBugClient, TraceBugEvent, TraceBugOptions, TraceBugReportInput } from './types';
 
 export function createRecorder(config: ServerConfig, options: TraceBugOptions): TraceBugClient {
   const buffer = new EventBuffer(config.scope);
@@ -11,7 +11,6 @@ export function createRecorder(config: ServerConfig, options: TraceBugOptions): 
   let stopped = false;
   let uploading: Promise<string> | undefined;
   let pending: { payload: Record<string, unknown>; events: TraceBugEvent[]; screenshot?: Blob } | undefined;
-  let captureRunning: Promise<Blob> | undefined;
   const selector = `${PRIVATE_SELECTOR}${options.privateSelector ? ',' + options.privateSelector : ''}`;
   // Validate custom selectors before installing any hooks.
   document.querySelector(selector);
@@ -215,8 +214,9 @@ export function createRecorder(config: ServerConfig, options: TraceBugOptions): 
     pending = undefined;
   };
 
-  async function submit(): Promise<string> {
+  async function submit(input: TraceBugReportInput): Promise<string> {
     if (stopped) throw new Error('TraceBug is stopped');
+    if (!input.summary?.trim() || input.summary.trim().length < 3) throw new Error('Add a problem summary of at least 3 characters.');
     const response = await originalFetch.call(window, options.configUrl ?? '/_tracebug/config', {
       credentials: options.credentials ?? 'same-origin', headers: requestHeaders(options), cache: 'no-store', signal: AbortSignal.timeout(8000),
     });
@@ -233,20 +233,23 @@ export function createRecorder(config: ServerConfig, options: TraceBugOptions): 
         page: { url: url(location.href), viewport: { width: innerWidth, height: innerHeight },
           screen: { width: screen.width, height: screen.height }, dpr: devicePixelRatio,
           orientation: screen.orientation?.type ?? (innerWidth > innerHeight ? 'landscape' : 'portrait'), user_agent: safeText(navigator.userAgent) },
-        ui: diagnose(selector, url), screenshot_status: 'disabled',
+        ui: diagnose(selector, url), screenshot_status: 'disabled', screenshot_source: 'none',
+        qa: {
+          summary: safeText(input.summary.trim()).slice(0, 500),
+          ...(input.steps?.trim() ? { steps: safeText(input.steps.trim()) } : {}),
+          ...(input.expected?.trim() ? { expected: safeText(input.expected.trim()) } : {}),
+          ...(input.actual?.trim() ? { actual: safeText(input.actual.trim()) } : {}),
+        },
       };
       pending = { payload, events };
-      if (options.screenshot !== false) {
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        try {
-          // A timed-out canvas task cannot be cancelled; never start a second one alongside it.
-          if (captureRunning) throw new Error('capture-busy');
-          captureRunning = capture(selector);
-          void captureRunning.then(() => { captureRunning = undefined; }, () => { captureRunning = undefined; });
-          pending.screenshot = await Promise.race([captureRunning, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('capture-timeout')), 5000); })]);
-          payload.screenshot_status = 'captured';
-        } catch (error) { payload.screenshot_status = error instanceof Error && error.message === 'capture-timeout' ? 'timeout' : 'failed'; }
-        finally { clearTimeout(timer); }
+      if (input.screenshot) {
+        if (!['image/png', 'image/webp', 'image/jpeg'].includes(input.screenshot.type) || input.screenshot.size > 2 * 1024 * 1024) {
+          pending = undefined;
+          throw new Error('Screenshot must be PNG, JPEG or WebP and at most 2 MB.');
+        }
+        pending.screenshot = input.screenshot;
+        payload.screenshot_status = 'captured';
+        payload.screenshot_source = input.screenshotSource ?? 'upload';
       }
     }
     if (stopped || !pending) throw new Error('TraceBug is stopped');
@@ -272,8 +275,8 @@ export function createRecorder(config: ServerConfig, options: TraceBugOptions): 
   return {
     stop,
     recordError(error, info) { add('vue', errorData(error, info)); },
-    report() {
-      if (!uploading) uploading = submit().finally(() => { uploading = undefined; });
+    report(input) {
+      if (!uploading) uploading = submit(input).finally(() => { uploading = undefined; });
       return uploading;
     },
   };

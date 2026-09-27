@@ -54,7 +54,8 @@ class ReportTest extends TestCase
             'submission_id' => (string) Str::uuid(),
             'captured_at' => now()->toIso8601String(),
             'page' => ['url' => 'https://example.test/orders/123?token=secret#private'],
-            'events' => [], 'ui' => [], 'screenshot_status' => 'failed',
+            'qa' => ['summary' => 'Fixture bug report'],
+            'events' => [], 'ui' => [], 'screenshot_status' => 'disabled', 'screenshot_source' => 'none',
         ], $replace);
     }
 
@@ -106,6 +107,27 @@ class ReportTest extends TestCase
         $this->assertFileDoesNotExist($folder.'/screenshot.webp');
     }
 
+    public function test_qa_summary_is_searchable_and_redacted_before_storage(): void
+    {
+        $this->user();
+        $id = $this->upload($this->payload(['qa' => [
+            'summary' => 'Order total did not update for alice@example.com',
+            'steps' => 'Open order and click Save',
+            'expected' => 'New total',
+            'actual' => 'Old total',
+        ], 'screenshot_source' => 'none']))->assertCreated()->json('report_id');
+        $folder = $this->storage.'/reports/'.$id;
+        $report = json_decode(file_get_contents($folder.'/report.json'), true);
+        $this->assertSame('Order total did not update for [email]', $report['qa']['summary']);
+        $this->assertStringContainsString('Summary: Order total did not update for [email]', file_get_contents($folder.'/report.log'));
+        $this->assertStringNotContainsString('alice@example.com', file_get_contents($this->storage.'/tracebug.log'));
+        $this->artisan('tracebug:list')->assertSuccessful();
+        $this->upload($this->payload(['qa' => ['summary' => '  ']]))->assertUnprocessable();
+        $this->upload($this->payload(['qa' => []]))->assertUnprocessable();
+        $this->upload($this->payload(['screenshot_source' => null]))->assertUnprocessable();
+        $this->upload($this->payload(['screenshot_source' => 'browser']))->assertUnprocessable();
+    }
+
     public function test_request_context_links_by_client_id_and_is_user_scoped(): void
     {
         config(['tracebug.allowed_users' => []]);
@@ -150,8 +172,9 @@ class ReportTest extends TestCase
         $this->user();
         $this->upload($this->payload(['screenshot_status' => 'captured']))->assertUnprocessable();
         $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg==');
-        $id = $this->post('/_tracebug/reports', ['payload' => json_encode($this->payload(['screenshot_status' => 'captured'])), 'screenshot' => UploadedFile::fake()->createWithContent('screenshot.png', $png)], ['Accept' => 'application/json'])->assertCreated()->json('report_id');
+        $id = $this->post('/_tracebug/reports', ['payload' => json_encode($this->payload(['screenshot_status' => 'captured', 'screenshot_source' => 'upload'])), 'screenshot' => UploadedFile::fake()->createWithContent('screenshot.png', $png)], ['Accept' => 'application/json'])->assertCreated()->json('report_id');
         $this->assertFileExists($this->storage.'/reports/'.$id.'/screenshot.png');
+        $this->assertStringContainsString('Screenshot file: '.str_replace('\\', '/', $this->storage).'/reports/'.$id.'/screenshot.png', str_replace('\\', '/', file_get_contents($this->storage.'/reports/'.$id.'/report.log')));
     }
 
     public function test_prune_dry_run_and_show_path_validation(): void

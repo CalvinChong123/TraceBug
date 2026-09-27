@@ -15,6 +15,17 @@ export interface TraceBugOptions {
   correlationOrigins?: string[];
 }
 
+export type ScreenshotSource = 'browser' | 'upload' | 'paste';
+
+export interface TraceBugReportInput {
+  summary: string;
+  steps?: string;
+  expected?: string;
+  actual?: string;
+  screenshot?: Blob | null;
+  screenshotSource?: ScreenshotSource;
+}
+
 export interface TraceBugEvent {
   id: string;
   at: number;
@@ -30,7 +41,7 @@ export interface ServerConfig {
 }
 
 export interface TraceBugClient {
-  report(): Promise<string>;
+  report(input: TraceBugReportInput): Promise<string>;
   stop(): void;
   recordError(error: unknown, info?: string): void;
 }

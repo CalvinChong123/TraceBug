@@ -5,7 +5,7 @@ import { safeLabel, safeUrl } from '../../resources/js/privacy';
 import { createRecorder } from '../../resources/js/recorder';
 import type { TraceBugClient, TraceBugEvent } from '../../resources/js/types';
 
-vi.mock('../../resources/js/screenshot', () => ({ capture: vi.fn().mockRejectedValue(new Error('canvas unavailable')), diagnose: () => ({ horizontal_overflow: true }) }));
+vi.mock('../../resources/js/screenshot', () => ({ diagnose: () => ({ horizontal_overflow: true }) }));
 
 const config = { enabled: true, scope: 'test-user', endpoint: 'http://localhost:3000/_tracebug/reports' };
 let client: TraceBugClient | undefined;
@@ -104,13 +104,15 @@ describe('recording and submission', () => {
     });
     client = createRecorder(config, { screenshot: false });
     client.recordError(new Error('before'));
-    await expect(client.report()).rejects.toThrow('503');
+    await expect(client.report({ summary: 'Original QA summary', screenshot: null })).rejects.toThrow('503');
     client.recordError(new Error('during'));
-    await expect(client.report()).resolves.toBe('TB-test');
+    await expect(client.report({ summary: 'Changed on retry', screenshot: null })).resolves.toBe('TB-test');
     expect(uploads[0].get('payload')).toBe(uploads[1].get('payload'));
+    expect(String(uploads[0].get('payload'))).toContain('Original QA summary');
+    expect(String(uploads[0].get('payload'))).not.toContain('Changed on retry');
     expect(new EventBuffer(config.scope).snapshot()).toHaveLength(1);
   });
-  it('uploads remaining evidence if screenshot capture fails', async () => {
+  it('submits diagnostics without a screenshot', async () => {
     let payload: any;
     window.fetch = vi.fn(async (_input, init) => {
       if (init?.method !== 'POST') return new Response(JSON.stringify(config));
@@ -118,9 +120,28 @@ describe('recording and submission', () => {
       return new Response(JSON.stringify({ report_id: 'TB-test' }));
     });
     client = createRecorder(config, {});
-    await client.report();
-    expect(payload.screenshot_status).toBe('failed');
+    await client.report({ summary: 'No screenshot needed' });
+    expect(payload.screenshot_status).toBe('disabled');
+    expect(payload.screenshot_source).toBe('none');
+    expect(payload.qa.summary).toBe('No screenshot needed');
     expect(payload.ui.horizontal_overflow).toBe(true);
+  });
+  it('accepts a QA summary and an explicit image without starting DOM capture', async () => {
+    let payload: any;
+    let image: FormDataEntryValue | null = null;
+    window.fetch = vi.fn(async (_input, init) => {
+      if (init?.method !== 'POST') return new Response(JSON.stringify(config));
+      const form = init.body as FormData;
+      payload = JSON.parse(String(form.get('payload')));
+      image = form.get('screenshot');
+      return new Response(JSON.stringify({ report_id: 'TB-test' }));
+    });
+    client = createRecorder(config, {});
+    await client.report({ summary: 'Save failed', steps: 'Click Save', screenshot: new Blob(['image'], { type: 'image/webp' }), screenshotSource: 'browser' });
+    expect(payload.qa).toEqual({ summary: 'Save failed', steps: 'Click Save' });
+    expect(payload.screenshot_status).toBe('captured');
+    expect(payload.screenshot_source).toBe('browser');
+    expect(image).toBeInstanceOf(Blob);
   });
   it('includes browser resource timings in network evidence', async () => {
     let payload: any;
@@ -134,7 +155,7 @@ describe('recording and submission', () => {
       return new Response(JSON.stringify({ report_id: 'TB-test' }));
     });
     client = createRecorder(config, { screenshot: false });
-    await client.report();
+    await client.report({ summary: 'Banner failed to load' });
     expect(payload.events).toContainEqual(expect.objectContaining({
       type: 'network',
       data: expect.objectContaining({ url: '/storage/banner/abc.jpg', initiator_type: 'img', transfer_size: 1234 }),
@@ -145,7 +166,7 @@ describe('recording and submission', () => {
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...config, scope: 'other-user' })));
     window.fetch = fetch;
     client = createRecorder(config, {});
-    await expect(client.report()).rejects.toThrow('access changed');
+    await expect(client.report({ summary: 'Account issue' })).rejects.toThrow('access changed');
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(sessionStorage.getItem('tracebug:v1:test-user')).toBeNull();
   });
