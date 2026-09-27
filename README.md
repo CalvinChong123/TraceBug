@@ -1,12 +1,12 @@
 # TraceBug
 
-Reusable, opt-in diagnostic reports for **Laravel 12, PHP 8.2+, and Vue 3.3+**. Supports Vue applications with or without Inertia. The framework-neutral core also works in Blade/jQuery pages backed by Laravel.
+Reusable, opt-in diagnostic reports for **Laravel 12 and 13, PHP 8.2+ (Laravel 13 requires PHP 8.3+), and Vue 3.3+**. Supports Vue applications with or without Inertia. The framework-neutral core also works in Blade/jQuery pages backed by Laravel.
 
-Current GitHub tag: **v0.1.5**. Install this tag to get the QA form and native browser screenshot. The packages are not published to Packagist or the npm registry. No database migrations, dashboard, background uploads, or hosted service. Test in a staging application before enabling it for selected production users. Other Laravel versions and Vue 2 are not declared compatible.
+Current GitHub tag: **v0.1.6**. Install this tag to get the QA form and native browser screenshot. The packages are not published to Packagist or the npm registry. No database migrations, dashboard, background uploads, or hosted service. Test in a staging application before enabling it for selected production users. Laravel 12 and 13 are tested in CI; later major versions will be added after testing. Older Laravel versions and Vue 2 are not declared compatible.
 
 ## Quick start: install from GitHub (Laravel + Vue 3)
 
-The Composer and npm dependencies both come from the same `v0.1.5` Git tag. Pin both to that tag when upgrading.
+The Composer and npm dependencies both come from the same `v0.1.6` Git tag. Pin both to that tag when upgrading.
 
 1. In the consuming Laravel application's `composer.json`, add the GitHub VCS repository:
 
@@ -17,9 +17,9 @@ The Composer and npm dependencies both come from the same `v0.1.5` Git tag. Pin 
    }]
    ```
 
-   Then run `composer require tracebug/laravel:0.1.5` and `php artisan vendor:publish --tag=tracebug-config`.
+   Then run `composer require tracebug/laravel:0.1.6` and `php artisan vendor:publish --tag=tracebug-config`.
 
-2. In the same application, run `npm install github:CalvinChong123/TraceBug#v0.1.5`. In `.env`, set `TRACEBUG_ENABLED=true` and `TRACEBUG_ALLOWED_USERS=1` (replace `1` with your QA user's ID). Run `php artisan config:clear` if configuration was cached.
+2. In the same application, run `npm install github:CalvinChong123/TraceBug#v0.1.6`. In `.env`, set `TRACEBUG_ENABLED=true` and `TRACEBUG_ALLOWED_USERS=1` (replace `1` with your QA user's ID). Run `php artisan config:clear` if configuration was cached.
 
 3. In the root Blade template's `<head>`, add:
 
@@ -90,7 +90,7 @@ Install the tagged repository as a Composer VCS dependency. In the application's
 Then run in the application:
 
 ```shell
-composer require tracebug/laravel:0.1.5
+composer require tracebug/laravel:0.1.6
 php artisan vendor:publish --tag=tracebug-config
 ```
 
@@ -101,7 +101,7 @@ For local development while editing TraceBug, use a Composer path repository ins
   {
     "type": "path",
     "url": "C:/laragon/www/bug-tracking",
-    "options": { "symlink": true, "versions": { "tracebug/laravel": "0.1.5" } }
+    "options": { "symlink": true, "versions": { "tracebug/laravel": "0.1.6" } }
   }
 ]
 ```
@@ -109,7 +109,7 @@ For local development while editing TraceBug, use a Composer path repository ins
 Then run:
 
 ```shell
-composer require tracebug/laravel:0.1.5
+composer require tracebug/laravel:0.1.6
 php artisan vendor:publish --tag=tracebug-config
 ```
 
@@ -120,7 +120,7 @@ The service provider is auto-discovered.
 Recommended GitHub install:
 
 ```shell
-npm install github:CalvinChong123/TraceBug#v0.1.5
+npm install github:CalvinChong123/TraceBug#v0.1.6
 ```
 
 For local development while editing TraceBug:
@@ -136,7 +136,7 @@ cd C:/laragon/www/bug-tracking
 npm ci
 npm pack
 cd C:/laragon/www/your-app
-npm install C:/laragon/www/bug-tracking/tracebug-vue-0.1.5.tgz
+npm install C:/laragon/www/bug-tracking/tracebug-vue-0.1.6.tgz
 ```
 
 Import Vue components and the core through the documented exports only.
@@ -153,7 +153,7 @@ An empty allowlist allows **all authenticated users**, never guests. IDs can be 
 
 ### 4. Enable request correlation
 
-In Laravel 12 `bootstrap/app.php`, add to your existing middleware configuration:
+In Laravel 12 or 13 `bootstrap/app.php`, add to your existing middleware configuration:
 
 ```php
 use Illuminate\Foundation\Configuration\Middleware;
@@ -330,9 +330,9 @@ Install dependencies from the public GitHub repository:
 Then run:
 
 ```shell
-composer require tracebug/laravel:0.1.5
+composer require tracebug/laravel:0.1.6
 php artisan vendor:publish --tag=tracebug-config
-npm install github:CalvinChong123/TraceBug#v0.1.5
+npm install github:CalvinChong123/TraceBug#v0.1.6
 ```
 
 Enable only your test admin/user ID in `.env`:
