@@ -26,7 +26,12 @@ class PrivateStore
 
     public function cache(): Repository
     {
-        return new Repository(new FileStore(new Filesystem, $this->root().'/context', 0600));
+        $path = $this->root().'/context';
+        $this->directory($path);
+
+        // FileStore also uses its file mode for nested directories. Keep the
+        // context tree private and let those directories remain traversable.
+        return new Repository(new FileStore(new Filesystem, $path));
     }
 
     public function directory(string $path): void
@@ -34,6 +39,7 @@ class PrivateStore
         if (! is_dir($path) && ! @mkdir($path, 0700, true) && ! is_dir($path)) {
             throw new RuntimeException('Cannot create TraceBug storage directory.');
         }
+        @chmod($path, 0700);
     }
 
     public function write(string $path, string $contents): void

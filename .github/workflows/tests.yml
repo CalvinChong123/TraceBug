@@ -3,22 +3,13 @@ on: [push, pull_request]
 jobs:
   laravel:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - php: '8.2'
-            laravel: '^11.0'
-            testbench: '^9.0'
-          - php: '8.3'
-            laravel: '^12.0'
-            testbench: '^10.0'
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '${{ matrix.php }}'
+          php-version: '8.2'
           extensions: mbstring, dom, fileinfo
-      - run: composer update "laravel/framework:${{ matrix.laravel }}" "orchestra/testbench:${{ matrix.testbench }}" --with-all-dependencies --no-interaction
+      - run: composer install --no-interaction --prefer-dist
       - run: composer test
   browser:
     runs-on: ubuntu-latest
