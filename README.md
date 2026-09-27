@@ -1,12 +1,12 @@
 # TraceBug
 
-Reusable, opt-in diagnostic reports for **Laravel 12 and 13, PHP 8.2+ (Laravel 13 requires PHP 8.3+), and Vue 3.3+**. Supports Vue applications with or without Inertia. The framework-neutral core also works in Blade/jQuery pages backed by Laravel.
+Reusable, opt-in diagnostic reports for **Laravel 9 through 13**. Laravel 9 requires PHP 8.0.2+, Laravel 10 requires PHP 8.1+, Laravel 11 and 12 require PHP 8.2+, and Laravel 13 requires PHP 8.3+. The Vue integration requires Vue 3.3+. It supports Vue applications with or without Inertia; the browser core also works in Blade/jQuery pages backed by Laravel.
 
-Current GitHub tag: **v0.1.6**. Install this tag to get the QA form and native browser screenshot. The packages are not published to Packagist or the npm registry. No database migrations, dashboard, background uploads, or hosted service. Test in a staging application before enabling it for selected production users. Laravel 12 and 13 are tested in CI; later major versions will be added after testing. Older Laravel versions and Vue 2 are not declared compatible.
+Current GitHub tag: **v0.1.7**. Install this tag to get the QA form and native browser screenshot. The packages are not published to Packagist or the npm registry. No database migrations, dashboard, background uploads, or hosted service. Test in a staging application before enabling it for selected production users. Laravel 9, 10, 11, 12 and 13 are tested in CI; later major versions will be added after testing. Laravel 8 and Vue 2 are not declared compatible. Laravel 9 through 11 have passed their upstream security-support dates; package compatibility does not restore framework security support.
 
 ## Quick start: install from GitHub (Laravel + Vue 3)
 
-The Composer and npm dependencies both come from the same `v0.1.6` Git tag. Pin both to that tag when upgrading.
+The Composer and npm dependencies both come from the same `v0.1.7` Git tag. Pin both to that tag when upgrading.
 
 1. In the consuming Laravel application's `composer.json`, add the GitHub VCS repository:
 
@@ -17,9 +17,9 @@ The Composer and npm dependencies both come from the same `v0.1.6` Git tag. Pin 
    }]
    ```
 
-   Then run `composer require tracebug/laravel:0.1.6` and `php artisan vendor:publish --tag=tracebug-config`.
+   Then run `composer require tracebug/laravel:0.1.7` and `php artisan vendor:publish --tag=tracebug-config`.
 
-2. In the same application, run `npm install github:CalvinChong123/TraceBug#v0.1.6`. In `.env`, set `TRACEBUG_ENABLED=true` and `TRACEBUG_ALLOWED_USERS=1` (replace `1` with your QA user's ID). Run `php artisan config:clear` if configuration was cached.
+2. In the same application, run `npm install github:CalvinChong123/TraceBug#v0.1.7`. In `.env`, set `TRACEBUG_ENABLED=true` and `TRACEBUG_ALLOWED_USERS=1` (replace `1` with your QA user's ID). Run `php artisan config:clear` if configuration was cached.
 
 3. In the root Blade template's `<head>`, add:
 
@@ -90,7 +90,7 @@ Install the tagged repository as a Composer VCS dependency. In the application's
 Then run in the application:
 
 ```shell
-composer require tracebug/laravel:0.1.6
+composer require tracebug/laravel:0.1.7
 php artisan vendor:publish --tag=tracebug-config
 ```
 
@@ -101,7 +101,7 @@ For local development while editing TraceBug, use a Composer path repository ins
   {
     "type": "path",
     "url": "C:/laragon/www/bug-tracking",
-    "options": { "symlink": true, "versions": { "tracebug/laravel": "0.1.6" } }
+    "options": { "symlink": true, "versions": { "tracebug/laravel": "0.1.7" } }
   }
 ]
 ```
@@ -109,7 +109,7 @@ For local development while editing TraceBug, use a Composer path repository ins
 Then run:
 
 ```shell
-composer require tracebug/laravel:0.1.6
+composer require tracebug/laravel:0.1.7
 php artisan vendor:publish --tag=tracebug-config
 ```
 
@@ -120,7 +120,7 @@ The service provider is auto-discovered.
 Recommended GitHub install:
 
 ```shell
-npm install github:CalvinChong123/TraceBug#v0.1.6
+npm install github:CalvinChong123/TraceBug#v0.1.7
 ```
 
 For local development while editing TraceBug:
@@ -136,7 +136,7 @@ cd C:/laragon/www/bug-tracking
 npm ci
 npm pack
 cd C:/laragon/www/your-app
-npm install C:/laragon/www/bug-tracking/tracebug-vue-0.1.6.tgz
+npm install C:/laragon/www/bug-tracking/tracebug-vue-0.1.7.tgz
 ```
 
 Import Vue components and the core through the documented exports only.
@@ -153,7 +153,7 @@ An empty allowlist allows **all authenticated users**, never guests. IDs can be 
 
 ### 4. Enable request correlation
 
-In Laravel 12 or 13 `bootstrap/app.php`, add to your existing middleware configuration:
+In Laravel 11, 12 or 13 `bootstrap/app.php`, add to your existing middleware configuration:
 
 ```php
 use Illuminate\Foundation\Configuration\Middleware;
@@ -162,6 +162,17 @@ use TraceBug\Http\RecordRequest;
 ->withMiddleware(function (Middleware $middleware) {
     $middleware->web(append: [RecordRequest::class]);
 })
+```
+
+In Laravel 9 or 10, append `RecordRequest` to the `web` middleware group in `app/Http/Kernel.php`, after session and authentication middleware:
+
+```php
+protected $middlewareGroups = [
+    'web' => [
+        // Keep your existing web middleware in its existing order.
+        \TraceBug\Http\RecordRequest::class,
+    ],
+];
 ```
 
 This middleware must run after session initialization, with the application's authenticated user resolvable. For API routes, place it after your authentication middleware, for example:
@@ -297,12 +308,14 @@ php artisan tracebug:prune --days=30 --dry-run
 php artisan tracebug:prune --days=30
 ```
 
-Schedule pruning in the consuming application's `routes/console.php`:
+In Laravel 11 through 13, schedule pruning in the consuming application's `routes/console.php`:
 
 ```php
 use Illuminate\Support\Facades\Schedule;
 Schedule::command('tracebug:prune')->daily();
 ```
+
+In Laravel 9 or 10, add `$schedule->command('tracebug:prune')->daily();` to the `schedule(Schedule $schedule)` method in `app/Console/Kernel.php`.
 
 Configure Laravel's scheduler on the server. Temporary context expires logically after five minutes; daily pruning removes physically retained expired files. Restrict OS directory permissions (Windows needs appropriate NTFS ACLs), exclude reports from source control, and apply your backup-retention policy. Keep storage outside `public`; the package rejects public-directory paths. Rotate `tracebug.log` with your normal server log rotation.
 
@@ -314,7 +327,7 @@ File storage assumes a single application server or a shared filesystem with rel
 
 After the server eligibility check, dynamically import `@tracebug/vue/core` and call `startTraceBug()`. It returns `null` when unavailable or a client with `report({ summary, steps?, expected?, actual?, screenshot?, screenshotSource? })`, `recordError()` and `stop()`. Connect your own Blade button to `report({ summary })` and display its returned Report ID. A summary of at least three characters is required. Omitting `screenshot` submits no image. A custom Blade integration may also pass a reviewed screenshot `Blob` with `screenshotSource: 'upload'` or `'paste'`; the Vue button already provides native tab capture and preview. No Vue dependency is imported by the core entry point, though the npm package declares Vue as a peer for its Vue integration.
 
-### Example: Laravel 12 + Blade
+### Example: Laravel 9 through 13 + Blade
 
 Install dependencies from the public GitHub repository:
 
@@ -330,9 +343,9 @@ Install dependencies from the public GitHub repository:
 Then run:
 
 ```shell
-composer require tracebug/laravel:0.1.6
+composer require tracebug/laravel:0.1.7
 php artisan vendor:publish --tag=tracebug-config
-npm install github:CalvinChong123/TraceBug#v0.1.6
+npm install github:CalvinChong123/TraceBug#v0.1.7
 ```
 
 Enable only your test admin/user ID in `.env`:
@@ -343,7 +356,7 @@ TRACEBUG_ALLOWED_USERS=1
 TRACEBUG_RELEASE=your-deployment-commit
 ```
 
-Append `\TraceBug\Http\RecordRequest::class` to the `web` middleware group in `bootstrap/app.php` as described above.
+Append `\TraceBug\Http\RecordRequest::class` to the `web` middleware group as described above: use `app/Http/Kernel.php` on Laravel 9/10 or `bootstrap/app.php` on Laravel 11–13.
 
 In `resources/views/layouts/app.blade.php`, keep the existing CSRF meta and add this in `<head>`:
 

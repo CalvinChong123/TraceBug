@@ -7,12 +7,31 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - php: '8.0'
+            laravel: '9'
+            testbench: '^7.0'
+            phpunit: '^9.6'
+            legacy: true
+          - php: '8.1'
+            laravel: '10'
+            testbench: '^8.0'
+            phpunit: '^10.0'
+            legacy: true
+          - php: '8.2'
+            laravel: '11'
+            testbench: '^9.0'
+            phpunit: '^11.5.50'
+            legacy: true
           - php: '8.2'
             laravel: '12'
             testbench: '^10.0'
+            phpunit: '^11.5.50'
+            legacy: false
           - php: '8.3'
             laravel: '13'
             testbench: '^11.0'
+            phpunit: '^11.5.50'
+            legacy: false
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
@@ -21,8 +40,10 @@ jobs:
           extensions: mbstring, dom, fileinfo
       - run: composer install --no-interaction --prefer-dist
         if: matrix.laravel == '12'
-      - run: composer require --dev "orchestra/testbench:${{ matrix.testbench }}" --no-interaction --prefer-dist --with-all-dependencies
-        if: matrix.laravel == '13'
+      - run: composer require --dev "orchestra/testbench:${{ matrix.testbench }}" "phpunit/phpunit:${{ matrix.phpunit }}" --no-interaction --prefer-dist --with-all-dependencies
+        if: matrix.laravel != '12'
+        env:
+          COMPOSER_POLICY_ADVISORIES_BLOCK: ${{ matrix.legacy && '0' || '1' }}
       - run: composer test
   browser:
     runs-on: ubuntu-latest
