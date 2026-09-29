@@ -8,9 +8,12 @@ export type { TraceBugClient, TraceBugOptions, TraceBugEvent, TraceBugReportInpu
 
 const key: InjectionKey<ShallowRef<TraceBugClient | null>> = Symbol('TraceBug');
 const optionsKey: InjectionKey<TraceBugOptions> = Symbol('TraceBugOptions');
+let installedApp: App | undefined;
 
 export const TraceBugPlugin = {
   install(app: App, options: TraceBugOptions = {}) {
+    if (installedApp) throw new Error('TraceBug supports one Vue root. Install the plugin once in the persistent root.');
+    installedApp = app;
     const client = shallowRef<TraceBugClient | null>(null);
     app.provide(key, client);
     app.provide(optionsKey, options);
@@ -23,16 +26,24 @@ export const TraceBugPlugin = {
     };
     let disposed = false;
     void startTraceBug(options).then(value => {
-      if (disposed) value?.stop();
+      if (disposed) { if (!installedApp || installedApp === app) value?.stop(); }
       else {
         client.value = value;
-        if (value) app.config.errorHandler = handler;
+        if (value) {
+          app.config.errorHandler = handler;
+          value.onStop(() => {
+            if (client.value === value) client.value = null;
+            if (app.config.errorHandler === handler) app.config.errorHandler = previous;
+          });
+        }
       }
     });
     const unmount = app.unmount.bind(app);
     app.unmount = () => {
       disposed = true;
       client.value?.stop();
+      client.value = null;
+      if (installedApp === app) installedApp = undefined;
       if (app.config.errorHandler === handler) app.config.errorHandler = previous;
       unmount();
     };
@@ -50,13 +61,15 @@ export const TraceBugButton = defineComponent({
     const client = useTraceBug();
     const options = inject(optionsKey, {});
     const privateSelector = `${PRIVATE_SELECTOR}${options.privateSelector ? ',' + options.privateSelector : ''}`;
-    const nativeCaptureAvailable = !!navigator.mediaDevices && 'getDisplayMedia' in navigator.mediaDevices;
-    const screenshotsEnabled = options.screenshot !== false;
+    const nativeCaptureAvailable = window.top === window.self && !!navigator.mediaDevices && 'getDisplayMedia' in navigator.mediaDevices;
+    const screenshotsEnabled = () => options.screenshot !== false && client.value?.policy.screenshotsEnabled === true;
+    const requireSteps = () => client.value?.policy.requireSteps !== false;
     const open = ref(false);
     const loading = ref(false);
     const locked = ref(false);
     const hiddenForCapture = ref(false);
     const error = ref('');
+    const unknownResult = ref(false);
     const reportId = ref('');
     const copyMessage = ref('');
     const summary = ref('');
@@ -69,6 +82,7 @@ export const TraceBugButton = defineComponent({
     const screenshotReviewed = ref(false);
     const masks = ref<RedactionRect[]>([]);
     const draftMask = ref<RedactionRect | null>(null);
+    let draftGeneration = 0;
     let dragStart: { x: number; y: number } | null = null;
     let summaryField: HTMLTextAreaElement | null = null;
     const field = { display: 'block', width: '100%', boxSizing: 'border-box', padding: '8px', border: '1px solid #94a3b8', borderRadius: '6px', font: 'inherit' } as const;
@@ -83,11 +97,14 @@ export const TraceBugButton = defineComponent({
       masks.value = [];
       draftMask.value = null;
     };
-    onBeforeUnmount(() => { if (screenshotUrl.value) URL.revokeObjectURL(screenshotUrl.value); });
+    onBeforeUnmount(() => { draftGeneration++; hiddenForCapture.value = false; if (screenshotUrl.value) URL.revokeObjectURL(screenshotUrl.value); screenshot.value = null; client.value?.discard(); summary.value = steps.value = expected.value = actual.value = ''; });
 
     const reset = () => {
+      draftGeneration++;
+      hiddenForCapture.value = false;
       summary.value = steps.value = expected.value = actual.value = '';
       error.value = reportId.value = copyMessage.value = '';
+      unknownResult.value = false;
       locked.value = false;
       setScreenshot(null);
     };
@@ -96,12 +113,13 @@ export const TraceBugButton = defineComponent({
       open.value = true;
       void nextTick(() => summaryField?.focus());
     };
-    const close = () => { if (!loading.value) open.value = false; };
+    const close = () => { if (!loading.value) { client.value?.discard(); reset(); open.value = false; } };
 
     const chooseFile = async (file: File | null, source: ScreenshotSource) => {
       if (!file || locked.value) return;
-      try { setScreenshot(await prepareScreenshot(file), source); error.value = ''; }
-      catch (cause) { error.value = cause instanceof Error ? cause.message : 'Cannot read screenshot.'; }
+      const generation = draftGeneration;
+      try { const image = await prepareScreenshot(file); if (generation === draftGeneration && open.value && !locked.value) { setScreenshot(image, source); error.value = ''; } }
+      catch (cause) { if (generation === draftGeneration && open.value) error.value = cause instanceof Error ? cause.message : 'Cannot read screenshot.'; }
     };
     const paste = (event: ClipboardEvent) => {
       if (!open.value || locked.value) return;
@@ -110,9 +128,13 @@ export const TraceBugButton = defineComponent({
     };
     const captureTab = async () => {
       if (locked.value) return;
+      const generation = draftGeneration;
       error.value = '';
-      try { setScreenshot(await captureBrowserTab(privateSelector, hidden => { hiddenForCapture.value = hidden; }), 'browser'); }
-      catch (cause) { error.value = cause instanceof Error ? cause.message : 'Browser capture failed.'; }
+      try {
+        const image = await captureBrowserTab(privateSelector, hidden => { if (generation === draftGeneration) hiddenForCapture.value = hidden; });
+        if (generation === draftGeneration && open.value && !locked.value) setScreenshot(image, 'browser');
+      }
+      catch (cause) { if (generation === draftGeneration && open.value) error.value = cause instanceof Error ? cause.message : 'Browser capture failed.'; }
     };
     const point = (event: PointerEvent): { x: number; y: number } => {
       const rect = (event.currentTarget as Element).getBoundingClientRect();
@@ -135,7 +157,7 @@ export const TraceBugButton = defineComponent({
     };
     const submit = async (event: Event) => {
       event.preventDefault();
-      if (!client.value || loading.value || summary.value.trim().length < 3 || (screenshot.value && !screenshotReviewed.value)) return;
+      if (!client.value || loading.value || summary.value.trim().length < 3 || (requireSteps() && !steps.value.trim()) || (screenshot.value && !screenshotReviewed.value)) return;
       loading.value = true;
       error.value = '';
       try {
@@ -143,8 +165,9 @@ export const TraceBugButton = defineComponent({
         locked.value = true; // A retry must send the same submission ID and frozen evidence.
         reportId.value = await client.value.report({ summary: summary.value, steps: steps.value, expected: expected.value, actual: actual.value,
           screenshot: image, screenshotSource: screenshotSource.value ?? undefined });
+        summary.value = steps.value = expected.value = actual.value = '';
         setScreenshot(null);
-      } catch (cause) { error.value = cause instanceof Error ? cause.message : 'Report failed. Try again.'; }
+      } catch (cause) { unknownResult.value = cause instanceof Error && cause.name === 'TraceBugOutcomeUnknownError'; error.value = cause instanceof Error ? cause.message : 'Report failed. Try again.'; if (client.value && !client.value.isActive()) client.value = null; }
       finally { loading.value = false; }
     };
     const copy = async (value: string, label: string) => {
@@ -156,7 +179,7 @@ export const TraceBugButton = defineComponent({
     } });
     const textarea = (label: string, value: typeof summary, max: number, required = false) => h('label', { style: { display: 'block', marginBottom: '12px', fontWeight: '600' } }, [
       label,
-      h('textarea', { ref: required ? (el: unknown) => { summaryField = el instanceof HTMLTextAreaElement ? el : null; } : undefined,
+      h('textarea', { ref: required && label.startsWith('Problem') ? (el: unknown) => { summaryField = el instanceof HTMLTextAreaElement ? el : null; } : undefined,
         value: value.value, maxlength: max, minlength: required ? 3 : undefined, required, rows: required ? 2 : 3, disabled: locked.value, style: field,
         onInput: (event: Event) => { value.value = (event.target as HTMLTextAreaElement).value; } }),
     ]);
@@ -177,25 +200,25 @@ export const TraceBugButton = defineComponent({
         reportId.value ? h('div', { role: 'status', 'aria-live': 'polite' }, [
           h('p', 'Send this ID and a short summary to your developer:'),
           h('code', { style: { display: 'block', overflowWrap: 'anywhere', padding: '10px', background: '#f1f5f9', userSelect: 'all' } }, reportId.value),
-          h('p', summary.value),
           h('button', { type: 'button', onClick: () => { void copy(reportId.value, 'Report ID copied'); }, style: { ...button, marginTop: '10px' } }, 'Copy report ID'),
-          h('button', { type: 'button', onClick: () => { void copy(`${safeText(summary.value).slice(0, 500)}\n${reportId.value}`, 'QA note copied'); }, style: { ...button, marginTop: '10px', marginLeft: '8px' } }, 'Copy QA note'),
           copyMessage.value ? h('span', { style: { marginLeft: '10px' } }, copyMessage.value) : null,
         ]) : [
           textarea('Problem summary *', summary, 500, true),
+          requireSteps() ? textarea('Steps to reproduce *', steps, 1000, true) : null,
           h('details', { style: { marginBottom: '14px' } }, [
-            h('summary', { style: { cursor: 'pointer', fontWeight: '600', marginBottom: '10px' } }, 'Add reproduction details (optional)'),
-            textarea('Steps to reproduce', steps, 1000),
+            h('summary', { style: { cursor: 'pointer', fontWeight: '600', marginBottom: '10px' } }, 'Add more detail (optional)'),
+            !requireSteps() ? textarea('Steps to reproduce', steps, 1000) : null,
             textarea('Expected result', expected, 1000),
             textarea('Actual result', actual, 1000),
           ]),
-          screenshotsEnabled ? h('div', { style: { marginBottom: '10px', fontWeight: '600' } }, 'Screenshot (optional)') : null,
-          screenshotsEnabled ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' } }, [
+          screenshotsEnabled() ? h('div', { style: { marginBottom: '10px', fontWeight: '600' } }, 'Screenshot (optional)') : null,
+          screenshotsEnabled() ? h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' } }, [
             nativeCaptureAvailable ? h('button', { type: 'button', disabled: locked.value, onClick: captureTab, style: button }, 'Capture this tab') : null,
             h('label', { style: { ...button, display: 'inline-block' } }, ['Upload image', h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', disabled: locked.value,
               style: { display: 'none' }, onChange: (event: Event) => { const input = event.target as HTMLInputElement; void chooseFile(input.files?.[0] ?? null, 'upload'); input.value = ''; } })]),
           ]) : null,
-          screenshotsEnabled ? h('p', { style: { margin: '0 0 10px', fontSize: '12px', color: '#475569' } }, 'Choose this tab in the browser picker, or paste a system screenshot into this form. Check the preview before submitting.') : null,
+          screenshotsEnabled() ? h('p', { style: { margin: '0 0 10px', fontSize: '12px', color: '#475569' } }, 'Choose this tab. Masking cannot guarantee all private pixels are hidden; inspect the entire preview before submitting.') : null,
+          h('p', { style: { fontSize: '12px', color: '#475569' } }, 'Evidence is limited: private form state, request bodies and full URLs are never included. Do not type passwords, tokens, payment details or customer data in this form.'),
           screenshot.value ? h('div', [
             h('div', { style: { position: 'relative', width: '100%', maxHeight: '300px', overflow: 'auto', border: '1px solid #94a3b8' } }, [
               h('div', { style: { position: 'relative', width: '100%' } }, [
@@ -212,12 +235,12 @@ export const TraceBugButton = defineComponent({
               h('button', { type: 'button', disabled: locked.value, onClick: () => setScreenshot(null), style: button }, 'Remove screenshot'),
             ]),
             h('label', [h('input', { type: 'checkbox', checked: screenshotReviewed.value, disabled: locked.value,
-              onChange: (event: Event) => { screenshotReviewed.value = (event.target as HTMLInputElement).checked; } }), ' I checked this shows the intended page and blacked out sensitive content.']),
+              onChange: (event: Event) => { screenshotReviewed.value = (event.target as HTMLInputElement).checked; } }), ' I inspected the entire image and confirm it contains no private content.']),
           ]) : null,
           error.value ? h('p', { role: 'alert', style: { color: '#b91c1c' } }, error.value) : null,
           h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' } }, [
-            h('button', { type: 'button', disabled: loading.value, onClick: close, style: button }, 'Cancel'),
-            h('button', { type: 'submit', disabled: loading.value || summary.value.trim().length < 3 || !!(screenshot.value && !screenshotReviewed.value),
+            h('button', { type: 'button', disabled: loading.value, onClick: close, style: button }, unknownResult.value ? 'Discard draft (report may exist)' : 'Cancel'),
+            h('button', { type: 'submit', disabled: loading.value || summary.value.trim().length < 3 || (requireSteps() && !steps.value.trim()) || !!(screenshot.value && !screenshotReviewed.value),
               style: { ...button, background: '#172554', color: '#fff' } }, loading.value ? 'Saving…' : locked.value ? 'Retry report' : 'Save report'),
           ]),
         ],

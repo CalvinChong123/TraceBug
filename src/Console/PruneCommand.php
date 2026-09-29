@@ -25,13 +25,21 @@ class PruneCommand extends Command
                 continue;
             }
             $file = $folder.'/report.json';
-            if (is_file($file) && filemtime($file) < $cutoff) {
+            if (! is_link($file) && is_file($file) && filemtime($file) < $cutoff) {
                 $this->line(($this->option('dry-run') ? 'Would remove ' : 'Removing ').basename($folder));
                 if (! $this->option('dry-run')) {
                     (new Filesystem)->deleteDirectory($folder);
                 }
             }
         }
+        foreach (glob($root.'/reports/.pending-*', GLOB_ONLYDIR) ?: [] as $folder) {
+            if (! is_link($folder) && filemtime($folder) < time() - 86400) {
+                $this->line(($this->option('dry-run') ? 'Would remove ' : 'Removing ').basename($folder));
+                if (! $this->option('dry-run')) (new Filesystem)->deleteDirectory($folder);
+            }
+        }
+        // Older releases wrote an unbounded index; listing now reads retained reports.
+        if (is_file($root.'/tracebug.log') && ! $this->option('dry-run')) unlink($root.'/tracebug.log');
         // File cache expires lazily; remove old files so idle contexts do not accumulate.
         if (is_dir($root.'/context') && ! $this->option('dry-run')) {
             foreach ((new Filesystem)->allFiles($root.'/context') as $file) {

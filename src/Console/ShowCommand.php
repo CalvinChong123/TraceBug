@@ -17,8 +17,9 @@ class ShowCommand extends Command
             $this->error('Invalid report ID.');
             return self::FAILURE;
         }
-        $file = $store->root().'/reports/'.$id.'/'.($this->option('json') ? 'report.json' : 'report.log');
-        if (! is_file($file)) {
+        $folder = $store->root().'/reports/'.$id;
+        $file = $folder.'/'.($this->option('json') ? 'report.json' : 'report.log');
+        if (is_link($folder) || is_link($file) || ! is_file($file)) {
             $this->error('Report not found.');
             return self::FAILURE;
         }

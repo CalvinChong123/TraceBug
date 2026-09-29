@@ -8,7 +8,9 @@ export interface TraceBugOptions {
   /** Enable only after reviewing app messages for sensitive business data. */
   captureMessages?: boolean;
   captureConsole?: boolean;
-  /** Runs before any event enters memory/sessionStorage. Return null to omit it. */
+  /** Advanced opt-in: also requires the server flag and CORS/header review. */
+  correlateRequests?: boolean;
+  /** Runs before any event enters the memory buffer. Return null to omit it. */
   redact?: (event: TraceBugEvent) => TraceBugEvent | null;
   sanitizeUrl?: (url: string) => string;
   /** Explicit additional first-party origins eligible for correlation headers. */
@@ -38,10 +40,18 @@ export interface ServerConfig {
   scope: string;
   endpoint: string;
   release?: string;
+  screenshot_enabled?: boolean;
+  require_steps?: boolean;
+  slow_request_ms?: number;
+  correlation_headers_enabled?: boolean;
 }
 
 export interface TraceBugClient {
   report(input: TraceBugReportInput): Promise<string>;
+  discard(): void;
+  isActive(): boolean;
+  onStop(listener: () => void): () => void;
   stop(): void;
   recordError(error: unknown, info?: string): void;
+  policy: { screenshotsEnabled: boolean; requireSteps: boolean };
 }

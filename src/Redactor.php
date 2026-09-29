@@ -7,10 +7,13 @@ class Redactor
     public function text(string $value): string
     {
         $value = preg_replace('/[\x00-\x1F\x7F]/', ' ', $value);
+        $value = preg_replace('~https?://\S+~i', '[url]', $value);
         $value = preg_replace('/Bearer\s+\S+/i', '[redacted]', $value);
         $value = preg_replace('/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i', '[email]', $value);
         $value = preg_replace('/\b(password|token|secret|authorization|cookie|api[_-]?key|csrf)\s*[:=]\s*[^\s,;]+/i', '$1=[redacted]', $value);
         $value = preg_replace('/\b\d{12,19}\b/', '[number]', $value);
+        $value = preg_replace('/\b(?:\d[ -]?){12,19}\b/', '[number]', $value);
+        $value = preg_replace('/\b[A-Za-z0-9_-]{20,}\b/', '[opaque]', $value);
         foreach (config('tracebug.redact_patterns', []) as $pattern) {
             $value = preg_replace($pattern, '[redacted]', $value) ?? '[redacted]';
         }
@@ -24,10 +27,10 @@ class Redactor
         if (! is_string($path)) {
             return '[invalid-url]';
         }
-        $path = preg_replace('~/[0-9]+(?=/|$)~', '/:id', $path);
-        $path = preg_replace('~/[a-zA-Z0-9_-]{24,}(?=/|$)~', '/:id', $path);
-
-        return $this->text($path);
+        // A path segment can itself be a short token, customer name or account ID.
+        // Preserve only path depth; never persist a value supplied in a URL.
+        $count = min(12, count(array_filter(explode('/', $path), fn ($segment) => $segment !== '')));
+        return $count ? '/'.implode('/', array_fill(0, $count, ':segment')) : '/';
     }
 
     public function clean($value, int $depth = 0)

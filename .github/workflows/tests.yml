@@ -37,7 +37,7 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: mbstring, dom, fileinfo
+          extensions: mbstring, dom, fileinfo, gd
       - run: composer install --no-interaction --prefer-dist
         if: matrix.laravel == '12'
       - run: composer require --dev "orchestra/testbench:${{ matrix.testbench }}" "phpunit/phpunit:${{ matrix.phpunit }}" --no-interaction --prefer-dist --with-all-dependencies

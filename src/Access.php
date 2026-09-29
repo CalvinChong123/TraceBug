@@ -3,6 +3,7 @@
 namespace TraceBug;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 
 class Access
 {
@@ -13,13 +14,17 @@ class Access
 
     public function allows(Request $request): bool
     {
-        if (! config('tracebug.enabled') || ! $user = $this->user($request)) {
-            return false;
+        if (! config('tracebug.enabled') || ! is_string(config('app.key')) || config('app.key') === '') return false;
+        try {
+            $user = $this->user($request);
+            if (! $user) return false;
+            $ids = array_map('strval', config('tracebug.allowed_users', []));
+            if (in_array((string) $user->getAuthIdentifier(), $ids, true)) return true;
+            $ability = config('tracebug.gate');
+            return is_string($ability) && $ability !== '' && Gate::forUser($user)->allows($ability);
+        } catch (\Throwable $ignored) {
+            return false; // A broken host Gate must not break an ordinary page.
         }
-
-        $ids = array_map('strval', config('tracebug.allowed_users', []));
-
-        return $ids === [] || in_array((string) $user->getAuthIdentifier(), $ids, true);
     }
 
     public function scope(Request $request): string

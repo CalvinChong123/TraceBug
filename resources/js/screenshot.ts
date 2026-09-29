@@ -5,9 +5,18 @@ export interface RedactionRect { x: number; y: number; width: number; height: nu
 const MAX_PIXELS = 4_000_000;
 const MAX_BYTES = 2 * 1024 * 1024;
 
+async function within<T>(promise: Promise<T>, milliseconds: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([promise, new Promise<T>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('Screenshot capture timed out. Try an uploaded image.')), milliseconds);
+    })]);
+  } finally { if (timer) clearTimeout(timer); }
+}
+
 async function encode(canvas: HTMLCanvasElement): Promise<Blob> {
   for (const quality of [0.85, 0.7, 0.55]) {
-    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/webp', quality));
+    const blob = await within(new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/webp', quality)), 5000);
     if (blob && blob.size <= MAX_BYTES) return blob;
   }
   throw new Error('Screenshot is larger than 2 MB after compression.');
@@ -16,15 +25,17 @@ async function encode(canvas: HTMLCanvasElement): Promise<Blob> {
 async function loadImage(blob: Blob): Promise<HTMLImageElement> {
   const image = new Image();
   const url = URL.createObjectURL(blob);
+  let ready = false;
   try {
     const loaded = new Promise<void>((resolve, reject) => {
       image.onload = () => resolve();
       image.onerror = () => reject(new Error('Cannot read screenshot image.'));
     });
     image.src = url;
-    await loaded;
+    await within(loaded, 5000);
+    ready = true;
     return image;
-  } finally { URL.revokeObjectURL(url); }
+  } finally { image.onload = image.onerror = null; if (!ready) image.src = ''; URL.revokeObjectURL(url); }
 }
 
 function canvasFor(width: number, height: number): HTMLCanvasElement {
@@ -41,8 +52,12 @@ export async function prepareScreenshot(blob: Blob): Promise<Blob> {
   if (!['image/png', 'image/jpeg', 'image/webp'].includes(blob.type)) throw new Error('Use a PNG, JPEG or WebP screenshot.');
   const image = await loadImage(blob);
   const canvas = canvasFor(image.naturalWidth, image.naturalHeight);
-  canvas.getContext('2d')!.drawImage(image, 0, 0, canvas.width, canvas.height);
-  try { return await encode(canvas); }
+  try {
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Screenshot canvas is unavailable.');
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return await encode(canvas);
+  }
   finally { canvas.width = canvas.height = 0; }
 }
 
@@ -51,18 +66,22 @@ export async function redactScreenshot(blob: Blob, rectangles: RedactionRect[]):
   if (!rectangles.length) return blob;
   const image = await loadImage(blob);
   const canvas = canvasFor(image.naturalWidth, image.naturalHeight);
-  const context = canvas.getContext('2d')!;
-  context.drawImage(image, 0, 0, canvas.width, canvas.height);
-  context.fillStyle = '#0f172a';
-  for (const rect of rectangles) {
-    context.fillRect(rect.x * canvas.width, rect.y * canvas.height, rect.width * canvas.width, rect.height * canvas.height);
+  try {
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Screenshot canvas is unavailable.');
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    context.fillStyle = '#0f172a';
+    for (const rect of rectangles) {
+      context.fillRect(rect.x * canvas.width, rect.y * canvas.height, rect.width * canvas.width, rect.height * canvas.height);
+    }
+    return await encode(canvas);
   }
-  try { return await encode(canvas); }
   finally { canvas.width = canvas.height = 0; }
 }
 
 /** Capture browser-rendered pixels after a user chooses a tab in the browser permission picker. */
 export async function captureBrowserTab(selector: string, hideReportUi: (hidden: boolean) => void): Promise<Blob> {
+  if (window.top !== window.self) throw new Error('Native capture is disabled inside an iframe. Paste or upload a reviewed screenshot.');
   if (!navigator.mediaDevices?.getDisplayMedia) throw new Error('This browser cannot capture a tab. Paste or upload a screenshot.');
   // This must be the first asynchronous operation after the capture button click.
   const stream = await navigator.mediaDevices.getDisplayMedia({
@@ -78,27 +97,39 @@ export async function captureBrowserTab(selector: string, hideReportUi: (hidden:
     video.srcObject = stream;
     video.muted = true;
     video.playsInline = true;
-    await video.play();
+    await within(video.play(), 4000);
     hideReportUi(true);
-    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    await within(new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))), 2000);
     await Promise.race([
       new Promise<void>(resolve => video.requestVideoFrameCallback ? video.requestVideoFrameCallback(() => resolve()) : setTimeout(resolve, 180)),
       new Promise<void>(resolve => setTimeout(resolve, 900)),
     ]);
     const canvas = canvasFor(video.videoWidth, video.videoHeight);
-    const context = canvas.getContext('2d')!;
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    // Mask form controls and app-marked private regions before any image is uploaded.
-    const xScale = canvas.width / innerWidth;
-    const yScale = canvas.height / innerHeight;
-    context.fillStyle = '#0f172a';
-    for (const element of document.querySelectorAll(selector)) {
-      const rect = element.getBoundingClientRect();
-      if (rect.width && rect.height && rect.right > 0 && rect.bottom > 0 && rect.left < innerWidth && rect.top < innerHeight) {
-        context.fillRect(rect.left * xScale, rect.top * yScale, rect.width * xScale, rect.height * yScale);
+    try {
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Screenshot canvas is unavailable.');
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      // Mask current-document private elements before any image is uploaded.
+      const xScale = canvas.width / innerWidth;
+      const yScale = canvas.height / innerHeight;
+      context.fillStyle = '#0f172a';
+      const maskTargets = new Set<Element>(document.querySelectorAll(`${selector}, iframe, object, embed`));
+      if (maskTargets.size > 5000) throw new Error('Page is too complex for safe native masking. Upload a reviewed screenshot.');
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+      let scanned = 0;
+      while (walker.nextNode()) {
+        if (++scanned > 5000) throw new Error('Page is too complex for safe native masking. Upload a reviewed screenshot.');
+        const element = walker.currentNode as Element;
+        if (element.shadowRoot || element.tagName.includes('-')) maskTargets.add(element);
       }
+      for (const element of maskTargets) {
+        const rect = element.getBoundingClientRect();
+        if (rect.width && rect.height && rect.right > 0 && rect.bottom > 0 && rect.left < innerWidth && rect.top < innerHeight) {
+          context.fillRect(rect.left * xScale, rect.top * yScale, rect.width * xScale, rect.height * yScale);
+        }
+      }
+      return await encode(canvas);
     }
-    try { return await encode(canvas); }
     finally { canvas.width = canvas.height = 0; }
   } finally {
     hideReportUi(false);

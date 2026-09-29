@@ -9,14 +9,13 @@ use Illuminate\Support\Str;
 use Throwable;
 use TraceBug\Access;
 use TraceBug\PrivateStore;
-use TraceBug\Redactor;
 
 class RecordRequest
 {
     public function handle(Request $request, Closure $next)
     {
         $access = app(Access::class);
-        if (! $access->allows($request) || $request->is(trim(config('tracebug.prefix'), '/').'/*')) {
+        if (! config('tracebug.record_server_context') || ! $access->allows($request) || $request->is(trim(config('tracebug.prefix'), '/').'/*')) {
             return $next($request);
         }
 
@@ -39,7 +38,6 @@ class RecordRequest
 
         // Diagnostic failures must never break the application's response.
         try {
-            $redactor = app(Redactor::class);
             $context = [
                 'request_id' => $id,
                 'method' => $request->method(),
@@ -49,7 +47,6 @@ class RecordRequest
                 'duration_ms' => round((microtime(true) - $started) * 1000),
                 'exception' => $exception ? array_filter([
                     'class' => get_class($exception),
-                    'message' => config('tracebug.include_exception_messages') ? $redactor->text($exception->getMessage()) : null,
                     'file' => str_replace(base_path().DIRECTORY_SEPARATOR, '', $exception->getFile()),
                     'line' => $exception->getLine(),
                 ]) : null,

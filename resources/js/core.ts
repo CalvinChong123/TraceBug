@@ -26,8 +26,8 @@ export async function startTraceBug(options: TraceBugOptions = {}): Promise<Trac
       if (!config.enabled || typeof config.scope !== 'string' || typeof config.endpoint !== 'string') return null;
       config.endpoint = new URL(config.endpoint, configUrl).href;
       const { createRecorder } = await import('./recorder');
-      const recorder = createRecorder(config, options);
-      active = { ...recorder, stop() { recorder.stop(); active = undefined; } };
+      const recorder = createRecorder(config, options, () => { active = undefined; });
+      active = recorder;
       return active;
     } catch { return null; }
     finally { starting = undefined; }

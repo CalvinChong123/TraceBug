@@ -5,6 +5,7 @@ namespace TraceBug\Tests\Feature;
 use Illuminate\Auth\GenericUser;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 use Orchestra\Testbench\TestCase;
 use TraceBug\Http\RecordRequest;
@@ -54,7 +55,7 @@ class ReportTest extends TestCase
             'submission_id' => (string) Str::uuid(),
             'captured_at' => now()->toIso8601String(),
             'page' => ['url' => 'https://example.test/orders/123?token=secret#private'],
-            'qa' => ['summary' => 'Fixture bug report'],
+            'qa' => ['summary' => 'Fixture bug report', 'steps' => 'Click Save'],
             'events' => [], 'ui' => [], 'screenshot_status' => 'disabled', 'screenshot_source' => 'none',
         ], $replace);
     }
@@ -83,17 +84,18 @@ class ReportTest extends TestCase
         $this->assertArrayNotHasKey('allowed_users', $response->json());
     }
 
-    public function test_empty_allowlist_still_requires_authentication(): void
+    public function test_empty_allowlist_fails_closed(): void
     {
         config(['tracebug.allowed_users' => []]);
         $this->getJson('/_tracebug/config')->assertJsonPath('enabled', false);
-        $this->user(99)->getJson('/_tracebug/config')->assertJsonPath('enabled', true);
+        $this->user(99)->getJson('/_tracebug/config')->assertJsonPath('enabled', false);
     }
 
     public function test_report_is_private_redacted_and_retry_is_idempotent(): void
     {
         $this->user();
-        $payload = $this->payload(['events' => [['id' => 'e1', 'at' => 1000, 'type' => 'error', 'data' => ['message' => 'password=hunter2 alice@example.com', 'headers' => ['Authorization' => 'secret'], 'body' => 'secret']]]]);
+        $this->upload($this->payload(['events' => [['id' => 'e1', 'at' => 1000, 'type' => 'error', 'data' => ['headers' => ['Authorization' => 'secret']]]]]))->assertUnprocessable();
+        $payload = $this->payload(['events' => [['id' => 'e1', 'at' => 1000, 'type' => 'navigation', 'data' => ['url' => '/orders/123?token=secret']]]]);
         $id = $this->upload($payload)->assertCreated()->json('report_id');
         $this->upload($payload)->assertOk()->assertJsonPath('report_id', $id)->assertJsonPath('duplicate', true);
         $folder = $this->storage.'/reports/'.$id;
@@ -101,7 +103,7 @@ class ReportTest extends TestCase
         $this->assertStringNotContainsString('hunter2', $json);
         $this->assertStringNotContainsString('alice@example.com', $json);
         $this->assertStringNotContainsString('Authorization', $json);
-        $this->assertSame('/orders/:id', json_decode($json, true)['page']['url']);
+        $this->assertSame('/:segment/:segment', json_decode($json, true)['page']['url']);
         $this->assertCount(1, glob($this->storage.'/reports/TB-*'));
         foreach (['report.log', 'network.json', 'console.json', 'ui-diagnostics.json'] as $file) $this->assertFileExists($folder.'/'.$file);
         $this->assertFileDoesNotExist($folder.'/screenshot.webp');
@@ -120,7 +122,7 @@ class ReportTest extends TestCase
         $report = json_decode(file_get_contents($folder.'/report.json'), true);
         $this->assertSame('Order total did not update for [email]', $report['qa']['summary']);
         $this->assertStringContainsString('Summary: Order total did not update for [email]', file_get_contents($folder.'/report.log'));
-        $this->assertStringNotContainsString('alice@example.com', file_get_contents($this->storage.'/tracebug.log'));
+        $this->assertFileDoesNotExist($this->storage.'/tracebug.log');
         $this->artisan('tracebug:list')->assertSuccessful();
         $this->upload($this->payload(['qa' => ['summary' => '  ']]))->assertUnprocessable();
         $this->upload($this->payload(['qa' => []]))->assertUnprocessable();
@@ -130,7 +132,8 @@ class ReportTest extends TestCase
 
     public function test_request_context_links_by_client_id_and_is_user_scoped(): void
     {
-        config(['tracebug.allowed_users' => []]);
+        config(['tracebug.record_server_context' => true]);
+        config(['tracebug.allowed_users' => ['1', '2']]);
         $this->user();
         $client = (string) Str::uuid();
         $requestId = $this->withHeader('X-TraceBug-ID', $client)->getJson('/fixture')->assertOk()->headers->get('X-Request-ID');
@@ -147,6 +150,7 @@ class ReportTest extends TestCase
 
     public function test_exception_context_is_recorded_without_message_by_default(): void
     {
+        config(['tracebug.record_server_context' => true]);
         $this->user();
         $response = $this->postJson('/failure')->assertStatus(500);
         $requestId = $response->headers->get('X-Request-ID');
@@ -169,12 +173,14 @@ class ReportTest extends TestCase
 
     public function test_valid_image_is_saved_and_status_mismatch_is_rejected(): void
     {
+        config(['tracebug.screenshots_enabled' => true]);
         $this->user();
         $this->upload($this->payload(['screenshot_status' => 'captured']))->assertUnprocessable();
-        $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg==');
+        $pixel = imagecreatetruecolor(1, 1);
+        ob_start(); imagepng($pixel); $png = ob_get_clean(); imagedestroy($pixel);
         $id = $this->post('/_tracebug/reports', ['payload' => json_encode($this->payload(['screenshot_status' => 'captured', 'screenshot_source' => 'upload'])), 'screenshot' => UploadedFile::fake()->createWithContent('screenshot.png', $png)], ['Accept' => 'application/json'])->assertCreated()->json('report_id');
-        $this->assertFileExists($this->storage.'/reports/'.$id.'/screenshot.png');
-        $this->assertStringContainsString('Screenshot file: '.str_replace('\\', '/', $this->storage).'/reports/'.$id.'/screenshot.png', str_replace('\\', '/', file_get_contents($this->storage.'/reports/'.$id.'/report.log')));
+        $this->assertFileExists($this->storage.'/reports/'.$id.'/screenshot.webp');
+        $this->assertStringContainsString('Screenshot file: '.str_replace('\\', '/', $this->storage).'/reports/'.$id.'/screenshot.webp', str_replace('\\', '/', file_get_contents($this->storage.'/reports/'.$id.'/report.log')));
     }
 
     public function test_prune_dry_run_and_show_path_validation(): void
@@ -201,13 +207,15 @@ class ReportTest extends TestCase
 
     public function test_recording_without_submission_creates_no_report(): void
     {
-        $this->user()->getJson('/fixture')->assertOk()->assertHeader('X-Request-ID');
+        $this->user()->getJson('/fixture')->assertOk()->assertHeaderMissing('X-Request-ID');
+        $this->assertDirectoryDoesNotExist($this->storage);
         $this->assertDirectoryDoesNotExist($this->storage.'/reports');
         $this->assertFileDoesNotExist($this->storage.'/tracebug.log');
     }
 
     public function test_server_context_expires(): void
     {
+        config(['tracebug.record_server_context' => true]);
         $this->user();
         $requestId = $this->getJson('/fixture')->headers->get('X-Request-ID');
         $this->travel(6)->minutes();
@@ -220,9 +228,48 @@ class ReportTest extends TestCase
     public function test_public_storage_is_rejected_without_breaking_application_requests(): void
     {
         $this->user();
+        $mode = fileperms(public_path()) & 0777;
         config(['tracebug.storage_path' => public_path()]);
         $this->getJson('/fixture')->assertOk();
         $this->upload($this->payload())->assertStatus(500);
+        clearstatcache(true, public_path());
+        $this->assertSame($mode, fileperms(public_path()) & 0777);
+        $nested = public_path('tracebug-should-not-create');
+        config(['tracebug.storage_path' => $nested]);
+        $this->upload($this->payload())->assertStatus(500);
+        $this->assertDirectoryDoesNotExist($nested);
+        config(['tracebug.storage_path' => base_path()]);
+        $this->upload($this->payload())->assertStatus(500);
+        config(['tracebug.storage_path' => storage_path('logs')]);
+        $this->upload($this->payload())->assertStatus(500);
+    }
+
+    public function test_existing_shared_directory_is_never_chmodded(): void
+    {
+        if (DIRECTORY_SEPARATOR !== '/') $this->markTestSkipped('POSIX permission check.');
+        mkdir($this->storage, 0755, true);
+        chmod($this->storage, 0755);
+        config(['tracebug.storage_path' => $this->storage]);
+        $this->user();
+        $this->upload($this->payload())->assertStatus(500);
+        clearstatcache(true, $this->storage);
+        $this->assertSame(0755, fileperms($this->storage) & 0777);
+    }
+
+    public function test_show_rejects_a_symlinked_report_file(): void
+    {
+        $this->user();
+        $id = $this->upload($this->payload())->assertCreated()->json('report_id');
+        $outside = $this->storage.'/outside.log';
+        file_put_contents($outside, 'outside content');
+        $link = $this->storage.'/reports/'.$id.'/report.log';
+        unlink($link);
+        if (! @symlink($outside, $link)) $this->markTestSkipped('Symlink creation unavailable.');
+        try {
+            $this->artisan('tracebug:show', ['id' => $id])->assertFailed();
+        } finally {
+            unlink($link);
+        }
     }
 
     public function test_same_user_different_sessions_cannot_read_context(): void
@@ -238,5 +285,112 @@ class ReportTest extends TestCase
         $b->setLaravelSession($second);
         $access = app(\TraceBug\Access::class);
         $this->assertNotSame($access->scope($a), $access->scope($b));
+    }
+
+    public function test_gate_can_authorize_when_the_id_allowlist_is_empty(): void
+    {
+        config(['tracebug.allowed_users' => [], 'tracebug.gate' => 'tracebug-reviewer']);
+        Gate::define('tracebug-reviewer', fn ($user) => (string) $user->getAuthIdentifier() === '2');
+        $this->user(1)->getJson('/_tracebug/config')->assertJsonPath('enabled', false);
+        $this->user(2)->getJson('/_tracebug/config')->assertJsonPath('enabled', true);
+    }
+
+    public function test_broken_gate_and_missing_app_key_fail_closed(): void
+    {
+        config(['tracebug.allowed_users' => [], 'tracebug.gate' => 'broken-tracebug-gate']);
+        Gate::define('broken-tracebug-gate', fn () => throw new \RuntimeException('host policy failed'));
+        $this->user()->getJson('/_tracebug/config')->assertJsonPath('enabled', false);
+        config(['tracebug.allowed_users' => ['1'], 'tracebug.gate' => null, 'app.key' => '']);
+        $this->getJson('/_tracebug/config')->assertJsonPath('enabled', false);
+    }
+
+    public function test_nested_unknown_fields_and_missing_steps_are_rejected(): void
+    {
+        $this->user();
+        $this->upload($this->payload(['qa' => ['summary' => 'Save failed']]))->assertUnprocessable();
+        $this->upload($this->payload(['ui' => ['card_number' => '4111 1111 1111 1111']]))->assertUnprocessable();
+        $this->upload($this->payload(['events' => [['id' => 'e', 'at' => 1, 'type' => 'network', 'data' => ['headers' => ['cookie' => 'private']]]]]))->assertUnprocessable();
+        $this->upload($this->payload(['events' => [['id' => 'e', 'at' => 1, 'type' => 'error', 'data' => ['frames' => [['url' => '/app.js', 'secret' => 'private']]]]]]))->assertUnprocessable();
+        $this->assertDirectoryDoesNotExist($this->storage.'/reports');
+        config(['tracebug.require_steps' => false]);
+        $this->upload($this->payload(['qa' => ['summary' => 'Save failed'], 'events' => [[
+            'id' => 'broken-image', 'at' => 1, 'type' => 'error', 'data' => ['name' => 'ImageLoadError', 'source_url' => '/private/image.png'],
+        ]]]))->assertCreated();
+    }
+
+    public function test_idempotency_requires_matching_payload_and_completion_marker(): void
+    {
+        $this->user();
+        $payload = $this->payload();
+        $id = $this->upload($payload)->assertCreated()->json('report_id');
+        $this->assertFileExists($this->storage.'/reports/'.$id.'/complete.json');
+        $this->upload($payload)->assertOk()->assertJsonPath('duplicate', true);
+        $this->upload(array_replace_recursive($payload, ['qa' => ['summary' => 'A changed summary']]))->assertStatus(409);
+        unlink($this->storage.'/reports/'.$id.'/complete.json');
+        $this->upload($payload)->assertStatus(409);
+    }
+
+    public function test_screenshots_are_disabled_by_default_and_reencoded_without_metadata(): void
+    {
+        $this->user();
+        $image = imagecreatetruecolor(2, 2);
+        ob_start(); imagejpeg($image); $jpeg = ob_get_clean(); imagedestroy($image);
+        $jpeg .= 'GPSDATA';
+        $fields = ['payload' => json_encode($this->payload(['screenshot_status' => 'captured', 'screenshot_source' => 'upload'])),
+            'screenshot' => UploadedFile::fake()->createWithContent('screen.jpg', $jpeg)];
+        $this->post('/_tracebug/reports', $fields, ['Accept' => 'application/json'])->assertUnprocessable();
+        config(['tracebug.screenshots_enabled' => true]);
+        $id = $this->post('/_tracebug/reports', $fields, ['Accept' => 'application/json'])->assertCreated()->json('report_id');
+        $saved = file_get_contents($this->storage.'/reports/'.$id.'/screenshot.webp');
+        $this->assertStringNotContainsString('GPSDATA', $saved);
+        $this->assertSame('image/webp', getimagesizefromstring($saved)['mime']);
+    }
+
+    public function test_prune_removes_pending_folders_and_legacy_index(): void
+    {
+        $this->user();
+        $id = $this->upload($this->payload())->assertCreated()->json('report_id');
+        touch($this->storage.'/reports/'.$id.'/report.json', time() - 40 * 86400);
+        $pending = $this->storage.'/reports/.pending-old';
+        mkdir($pending);
+        touch($pending, time() - 2 * 86400);
+        file_put_contents($this->storage.'/tracebug.log', 'legacy private summary');
+        $this->artisan('tracebug:prune', ['--days' => 30])->assertSuccessful();
+        $this->assertDirectoryDoesNotExist($pending);
+        $this->assertFileDoesNotExist($this->storage.'/tracebug.log');
+        $this->assertDirectoryDoesNotExist($this->storage.'/reports/'.$id);
+    }
+
+    public function test_report_count_cap_rejects_new_reports_but_allows_exact_retry(): void
+    {
+        $this->user();
+        config(['tracebug.max_reports' => 1]);
+        $payload = $this->payload();
+        $this->upload($payload)->assertCreated();
+        $this->upload($payload)->assertOk()->assertJsonPath('duplicate', true);
+        $this->upload($this->payload())->assertStatus(507);
+    }
+
+    public function test_email_auth_identifier_is_not_written_to_report(): void
+    {
+        config(['tracebug.allowed_users' => ['alice@example.com']]);
+        $this->actingAs(new GenericUser(['id' => 'alice@example.com']));
+        $id = $this->upload($this->payload())->assertCreated()->json('report_id');
+        $json = file_get_contents($this->storage.'/reports/'.$id.'/report.json');
+        $this->assertStringNotContainsString('alice@example.com', $json);
+        $this->assertArrayHasKey('user_ref', json_decode($json, true));
+    }
+
+    public function test_free_text_urls_and_spaced_card_numbers_are_redacted(): void
+    {
+        $this->user();
+        $id = $this->upload($this->payload(['qa' => [
+            'summary' => 'Failed at https://example.test/reset/shortToken?token=secret',
+            'steps' => 'Enter 4111 1111 1111 1111 then Save',
+        ]]))->assertCreated()->json('report_id');
+        $json = file_get_contents($this->storage.'/reports/'.$id.'/report.json');
+        $this->assertStringNotContainsString('shortToken', $json);
+        $this->assertStringNotContainsString('4111 1111 1111 1111', $json);
+        $this->assertStringContainsString('[url]', $json);
     }
 }

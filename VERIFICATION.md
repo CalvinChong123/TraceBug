@@ -1,13 +1,16 @@
-# TraceBug v0.1.7 verification
+# TraceBug v0.2.0 hardening verification
 
-Local Windows checks on PHP 8.2.21:
+The current source is not yet tagged or published. Verify the release ref in both Composer and npm before deployment.
 
-- `composer validate --strict`: valid manifest.
-- `composer test`: 15 feature tests, 74 assertions passing on Laravel 12.
-- `composer update --lock`: no reported security advisories.
+Local checks on PHP 8.2.21 and Node 20.19.6:
 
-The GitHub Actions workflow tests Laravel 9 on PHP 8.0, Laravel 10 on PHP 8.1, Laravel 11 and 12 on PHP 8.2, and Laravel 13 on PHP 8.3. It also checks the Vue package with TypeScript, Vitest, production build, and Playwright. Check the latest workflow run for the release result. CI disables Composer's advisory blocker only in the end-of-life Laravel 9–11 jobs so their compatibility tests can resolve dependencies; consuming applications keep their own Composer security policy.
+- `composer validate --strict`
+- `composer test` — includes authorization, CSRF in a web-stack fixture, closed report fields, image re-encoding, idempotency, and pruning.
+- `npm run typecheck`
+- `npm test` — includes memory-only buffering, non-mutating requests, rollback, outcome handling, and Vue root ownership.
+- `npm run build`
+- `npx playwright test` — includes strict CSP, cross-origin header-free requests, iframe fallback, cancellation, and screenshot review in Chromium and emulated WebKit.
 
-A separate Composer consumer manifest installed `tracebug/laravel` v0.1.7 from the public GitHub tag with Laravel 9.52.22. Composer 2.10.3 then reproduced the advisory blocker on a fresh update; a Laravel-9-scoped `policy.advisories.ignore` rule with `on-audit: false` allowed resolution while still reporting the advisories.
+The POSIX permission-mode regression test is skipped on Windows. The report-file symlink test also skips when Windows denies symlink creation; both run in the Linux CI matrix. Native tab capture and permission-denial checks are skipped in emulated mobile WebKit, which does not expose the desktop capture API.
 
-The browser fixture mocks HTTP endpoints; backend request handling is exercised separately with Laravel Testbench. A consuming application's session and auth configuration, CSP, custom CSS, and physical Safari/iPhone behavior still need integration testing.
+CI continues to exercise Laravel 9 through 13 on its PHP compatibility matrix. The browser fixture mocks report endpoints; the PHP suite exercises Laravel request handling. Neither substitutes for staging validation of the consuming application's actual auth/session setup, NTFS or Unix file permissions, CORS, CSP, scheduler, real browser picker, backup retention, and mobile Safari behavior.

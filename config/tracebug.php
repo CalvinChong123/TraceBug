@@ -2,8 +2,9 @@
 
 return [
     'enabled' => (bool) env('TRACEBUG_ENABLED', false),
-    // Empty means all authenticated users; guests are always denied.
+    // Empty means nobody. Define an ID allowlist or a Gate ability.
     'allowed_users' => array_values(array_filter(array_map('trim', explode(',', env('TRACEBUG_ALLOWED_USERS', ''))), fn ($id) => $id !== '')),
+    'gate' => env('TRACEBUG_GATE'),
     'guard' => null,
     'middleware' => ['web'], // For Sanctum APIs use ['api', 'auth:sanctum'].
     'prefix' => '_tracebug',
@@ -14,8 +15,13 @@ return [
     'max_payload_bytes' => 131072,
     'max_screenshot_kb' => 2048,
     'reports_per_minute' => 6,
-    // Messages can contain business data and are omitted unless explicitly enabled.
-    'include_exception_messages' => false,
+    'max_reports' => 1000,
+    'screenshots_enabled' => (bool) env('TRACEBUG_SCREENSHOTS_ENABLED', false),
+    'require_steps' => true,
+    'slow_request_ms' => 1500,
+    // Advanced opt-ins. Server context writes files before a report exists.
+    'record_server_context' => false,
+    'correlation_headers_enabled' => false,
     // Applied on top of built-in redaction. Use valid PCRE patterns.
     'redact_patterns' => [],
 ];
